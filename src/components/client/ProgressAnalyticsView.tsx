@@ -1,0 +1,811 @@
+import React, { useState } from 'react';
+import { 
+  TrendingDown, 
+  TrendingUp, 
+  Scale, 
+  Camera, 
+  Ruler, 
+  Calendar, 
+  Plus, 
+  ArrowRight, 
+  Check, 
+  Flame, 
+  Sparkles, 
+  Maximize2,
+  X,
+  UploadCloud
+} from 'lucide-react';
+import { useFitnessData } from '../../context/FitnessDataContext';
+import { useAuth } from '../../context/AuthContext';
+import { ProgressMetricPoint, ProgressPhotoRecord } from '../../types';
+
+interface ProgressAnalyticsViewProps {
+  clientId?: string;
+  isCoachView?: boolean;
+}
+
+export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({ 
+  clientId, 
+  isCoachView = false 
+}) => {
+  const { user } = useAuth();
+  const { progressMetrics, progressPhotos, logProgressMetric, addProgressPhoto, clients } = useFitnessData();
+
+  const targetClientId = clientId || (user?.role === 'client' ? user.uid : 'client_alex');
+  const clientInfo = clients.find(c => c.id === targetClientId) || clients[0];
+
+  // Filter metrics and photos for this client
+  const clientMetrics = progressMetrics
+    .filter(m => m.clientId === targetClientId || m.clientId === 'client_alex')
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const clientPhotos = progressPhotos
+    .filter(p => p.clientId === targetClientId || p.clientId === 'client_alex')
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  // Active chart metric toggle
+  const [activeChartMetric, setActiveChartMetric] = useState<'weight' | 'waist' | 'volume'>('weight');
+
+  // New Metric Modal / Form State
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [newWeight, setNewWeight] = useState('');
+  const [newWaist, setNewWaist] = useState('');
+  const [newChest, setNewChest] = useState('');
+  const [newBiceps, setNewBiceps] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+
+  // New Photo Modal State
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [photoFrontUrl, setPhotoFrontUrl] = useState('');
+  const [photoSideUrl, setPhotoSideUrl] = useState('');
+  const [photoWeight, setPhotoWeight] = useState('');
+  const [photoNotes, setPhotoNotes] = useState('');
+
+  // Before / After Comparison state
+  const firstPhoto = clientPhotos[0];
+  const latestPhoto = clientPhotos[clientPhotos.length - 1];
+  const [selectedBeforePhoto, setSelectedBeforePhoto] = useState<ProgressPhotoRecord | undefined>(firstPhoto);
+  const [selectedAfterPhoto, setSelectedAfterPhoto] = useState<ProgressPhotoRecord | undefined>(latestPhoto);
+  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
+
+  // Latest stats
+  const latestMetric = clientMetrics[clientMetrics.length - 1];
+  const initialMetric = clientMetrics[0];
+  const startingWeight = clientInfo?.startingWeightKg || initialMetric?.weightKg || 84.5;
+  const currentWeight = latestMetric?.weightKg || clientInfo?.currentWeightKg || 81.2;
+  const targetWeight = clientInfo?.targetWeightKg || 78.0;
+  const weightChange = (currentWeight - startingWeight).toFixed(1);
+  const weightRemaining = Math.max(0, currentWeight - targetWeight).toFixed(1);
+
+  // Submit new metric
+  const handleLogMetric = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWeight) return;
+    const w = parseFloat(newWeight);
+    const wst = newWaist ? parseFloat(newWaist) : undefined;
+    const ch = newChest ? parseFloat(newChest) : undefined;
+    const bi = newBiceps ? parseFloat(newBiceps) : undefined;
+
+    logProgressMetric({
+      clientId: targetClientId,
+      date: new Date().toISOString().split('T')[0],
+      weightKg: w,
+      waistCm: wst,
+      chestCm: ch,
+      bicepsCm: bi,
+      notes: newNotes || 'Direct entry from Progress Dashboard'
+    });
+
+    setNewWeight('');
+    setNewWaist('');
+    setNewChest('');
+    setNewBiceps('');
+    setNewNotes('');
+    setShowLogModal(false);
+  };
+
+  // Submit new photo
+  const handleLogPhoto = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!photoFrontUrl) return;
+
+    addProgressPhoto({
+      clientId: targetClientId,
+      date: new Date().toISOString().split('T')[0],
+      frontUrl: photoFrontUrl,
+      sideUrl: photoSideUrl || undefined,
+      weightKg: photoWeight ? parseFloat(photoWeight) : currentWeight,
+      notes: photoNotes || 'Physique update'
+    });
+
+    setPhotoFrontUrl('');
+    setPhotoSideUrl('');
+    setPhotoWeight('');
+    setPhotoNotes('');
+    setShowPhotoModal(false);
+  };
+
+  // Interactive SVG chart calculations
+  const chartPoints = clientMetrics.map((m, idx) => {
+    let val = m.weightKg;
+    if (activeChartMetric === 'waist') val = m.waistCm || 85;
+    if (activeChartMetric === 'volume') val = m.volumeLoadKg || 8000;
+    return {
+      index: idx,
+      date: m.date,
+      value: val,
+      metric: m
+    };
+  });
+
+  const values = chartPoints.map(p => p.value);
+  const minVal = values.length > 0 ? Math.min(...values) : 0;
+  const maxVal = values.length > 0 ? Math.max(...values) : 100;
+  const range = maxVal - minVal || 1;
+  const padding = range * 0.2;
+  const yMin = Math.max(0, minVal - padding);
+  const yMax = maxVal + padding;
+
+  // Chart SVG bounds
+  const svgWidth = 700;
+  const svgHeight = 220;
+  const margin = { top: 20, right: 30, bottom: 40, left: 50 };
+  const innerWidth = svgWidth - margin.left - margin.right;
+  const innerHeight = svgHeight - margin.top - margin.bottom;
+
+  const getX = (idx: number) => {
+    if (chartPoints.length <= 1) return margin.left + innerWidth / 2;
+    return margin.left + (idx / (chartPoints.length - 1)) * innerWidth;
+  };
+
+  const getY = (val: number) => {
+    const ratio = (val - yMin) / (yMax - yMin);
+    return margin.top + innerHeight - ratio * innerHeight;
+  };
+
+  // Line path
+  const linePath = chartPoints.reduce((acc, p, idx) => {
+    const x = getX(idx);
+    const y = getY(p.value);
+    return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+  }, '');
+
+  // Area path for gradient fill
+  const areaPath = chartPoints.length > 0 
+    ? `${linePath} L ${getX(chartPoints.length - 1)} ${margin.top + innerHeight} L ${getX(0)} ${margin.top + innerHeight} Z`
+    : '';
+
+  return (
+    <div className="space-y-6">
+      {/* Header with quick actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-neutral-50 border border-neutral-200 p-5 rounded-2xl">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-black text-neutral-900 tracking-tight font-display">
+              Progress & Physique Analytics
+            </h2>
+            <span className="px-2 py-0.5 bg-red-50 text-red-600 border border-red-200 text-[10px] font-bold uppercase rounded-md tracking-wider">
+              {clientInfo?.name || 'Client Tracking'}
+            </span>
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">
+            Biometric trends, progressive overload curves, and side-by-side physique transformations.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <button
+            id="log-metric-btn"
+            onClick={() => setShowLogModal(true)}
+            className="px-3.5 py-2 bg-white hover:bg-neutral-100 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <Scale className="w-4 h-4 text-red-600" />
+            <span>Log Biometrics</span>
+          </button>
+          <button
+            id="upload-photo-btn"
+            onClick={() => setShowPhotoModal(true)}
+            className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-200 transition-all flex items-center gap-1.5 border border-red-500/40 cursor-pointer"
+          >
+            <Camera className="w-4 h-4" />
+            <span>Upload Photo</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Metric Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Current Weight */}
+        <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-neutral-500 mb-2">
+            <span className="text-xs font-semibold">Current Scale Weight</span>
+            <Scale className="w-4 h-4 text-neutral-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-neutral-900">{currentWeight}</span>
+            <span className="text-xs text-neutral-500 font-bold">kg</span>
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-xs font-bold text-emerald-600">
+            <TrendingDown className="w-3.5 h-3.5" />
+            <span>{weightChange} kg from start</span>
+          </div>
+        </div>
+
+        {/* Goal Target */}
+        <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-neutral-500 mb-2">
+            <span className="text-xs font-semibold">Target Body Weight</span>
+            <Sparkles className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-neutral-900">{targetWeight}</span>
+            <span className="text-xs text-neutral-500 font-bold">kg</span>
+          </div>
+          <div className="mt-2 text-xs font-semibold text-neutral-500">
+            {weightRemaining} kg remaining to goal
+          </div>
+        </div>
+
+        {/* Waist Measurement */}
+        <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-neutral-500 mb-2">
+            <span className="text-xs font-semibold">Waist Circumference</span>
+            <Ruler className="w-4 h-4 text-red-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-neutral-900">{latestMetric?.waistCm || 83.5}</span>
+            <span className="text-xs text-neutral-500 font-bold">cm</span>
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-xs font-bold text-emerald-600">
+            <TrendingDown className="w-3.5 h-3.5" />
+            <span>-2.5 cm fat loss reduction</span>
+          </div>
+        </div>
+
+        {/* Training Volume */}
+        <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-neutral-500 mb-2">
+            <span className="text-xs font-semibold">Total Session Volume</span>
+            <Flame className="w-4 h-4 text-red-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-neutral-900">
+              {latestMetric?.volumeLoadKg ? `${(latestMetric.volumeLoadKg / 1000).toFixed(1)}k` : '10.2k'}
+            </span>
+            <span className="text-xs text-neutral-500 font-bold">kg lifted</span>
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-xs font-bold text-emerald-600">
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>+23.7% progressive overload</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Interactive Trend Chart */}
+      <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h3 className="text-sm font-bold text-neutral-900 uppercase tracking-wider">
+              Bio-Metric Progression Trend
+            </h3>
+            <p className="text-xs text-neutral-500">
+              Visualizing consistency across weekly check-in measurements and training blocks
+            </p>
+          </div>
+
+          {/* Metric Selector Buttons */}
+          <div className="flex items-center bg-neutral-100 p-1 rounded-xl border border-neutral-200 self-start sm:self-auto">
+            <button
+              onClick={() => setActiveChartMetric('weight')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                activeChartMetric === 'weight'
+                  ? 'bg-red-600 text-white shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              Weight (kg)
+            </button>
+            <button
+              onClick={() => setActiveChartMetric('waist')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                activeChartMetric === 'waist'
+                  ? 'bg-red-600 text-white shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              Waist (cm)
+            </button>
+            <button
+              onClick={() => setActiveChartMetric('volume')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                activeChartMetric === 'volume'
+                  ? 'bg-red-600 text-white shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              Volume Load (kg)
+            </button>
+          </div>
+        </div>
+
+        {/* SVG Chart */}
+        <div className="w-full overflow-x-auto">
+          <svg 
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`} 
+            className="w-full h-56 min-w-[500px]"
+          >
+            <defs>
+              <linearGradient id="metricGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#dc2626" stopOpacity="0.25" />
+                <stop offset="100%" stopColor="#dc2626" stopOpacity="0.0" />
+              </linearGradient>
+            </defs>
+
+            {/* Horizontal Grid lines */}
+            {[0, 0.25, 0.5, 0.75, 1].map((r, i) => {
+              const y = margin.top + innerHeight * r;
+              const gridVal = (yMax - r * (yMax - yMin)).toFixed(1);
+              return (
+                <g key={i}>
+                  <line
+                    x1={margin.left}
+                    y1={y}
+                    x2={svgWidth - margin.right}
+                    y2={y}
+                    stroke="#e5e5e5"
+                    strokeDasharray="4 4"
+                  />
+                  <text
+                    x={margin.left - 8}
+                    y={y + 4}
+                    fill="#737373"
+                    fontSize="10"
+                    textAnchor="end"
+                    fontFamily="sans-serif"
+                  >
+                    {gridVal}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Goal line for Weight */}
+            {activeChartMetric === 'weight' && (
+              <g>
+                <line
+                  x1={margin.left}
+                  y1={getY(targetWeight)}
+                  x2={svgWidth - margin.right}
+                  y2={getY(targetWeight)}
+                  stroke="#059669"
+                  strokeWidth="1.5"
+                  strokeDasharray="6 4"
+                />
+                <text
+                  x={svgWidth - margin.right}
+                  y={getY(targetWeight) - 6}
+                  fill="#059669"
+                  fontSize="10"
+                  fontWeight="bold"
+                  textAnchor="end"
+                >
+                  Target Goal: {targetWeight} kg
+                </text>
+              </g>
+            )}
+
+            {/* Gradient Area */}
+            {areaPath && (
+              <path d={areaPath} fill="url(#metricGradient)" />
+            )}
+
+            {/* Main Trend Line */}
+            {linePath && (
+              <path
+                d={linePath}
+                fill="none"
+                stroke="#ef4444"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* Data Point Circles and Labels */}
+            {chartPoints.map((p, idx) => {
+              const cx = getX(idx);
+              const cy = getY(p.value);
+              return (
+                <g key={p.metric.id} className="group cursor-pointer">
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r="5"
+                    fill="#ffffff"
+                    stroke="#ef4444"
+                    strokeWidth="2.5"
+                    className="group-hover:r-7 transition-all"
+                  />
+                  {/* Tooltip value */}
+                  <text
+                    x={cx}
+                    y={cy - 12}
+                    fill="#171717"
+                    fontSize="11"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {p.value} {activeChartMetric === 'weight' ? 'kg' : activeChartMetric === 'waist' ? 'cm' : 'kg'}
+                  </text>
+                  {/* Date label at bottom */}
+                  <text
+                    x={cx}
+                    y={svgHeight - 12}
+                    fill="#737373"
+                    fontSize="10"
+                    textAnchor="middle"
+                  >
+                    {p.date.slice(5)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {/* Physique Progress Photo Comparison */}
+      <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h3 className="text-sm font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-2">
+              <Camera className="w-4 h-4 text-red-600" />
+              <span>Physique Transformation Comparison</span>
+            </h3>
+            <p className="text-xs text-neutral-500">
+              Side-by-side visual accountability to evaluate muscle density and midsection definition
+            </p>
+          </div>
+
+          <button
+            onClick={() => setShowPhotoModal(true)}
+            className="text-xs font-bold text-red-600 hover:text-red-700 flex items-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Photos</span>
+          </button>
+        </div>
+
+        {clientPhotos.length >= 2 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Before Photo Card */}
+            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-neutral-600 bg-white px-2.5 py-1 rounded-md border border-neutral-200 shadow-xs">
+                  Baseline (Day 1)
+                </span>
+                <span className="text-xs font-bold text-neutral-700">
+                  {selectedBeforePhoto?.date} &bull; {selectedBeforePhoto?.weightKg} kg
+                </span>
+              </div>
+              <div 
+                onClick={() => selectedBeforePhoto && setEnlargedPhoto(selectedBeforePhoto.frontUrl)}
+                className="relative aspect-[3/4] bg-neutral-100 rounded-lg overflow-hidden border border-neutral-200 group cursor-pointer"
+              >
+                <img
+                  src={selectedBeforePhoto?.frontUrl}
+                  alt="Baseline physique"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-neutral-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Maximize2 className="w-6 h-6 text-white" />
+                </div>
+              </div>
+              <p className="text-xs text-neutral-500 mt-2.5 italic">
+                "{selectedBeforePhoto?.notes || 'Initial physique intake'}"
+              </p>
+            </div>
+
+            {/* Current / Latest Photo Card */}
+            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-red-600 bg-red-50 px-2.5 py-1 rounded-md border border-red-200">
+                  Current (Latest Check-in)
+                </span>
+                <span className="text-xs font-bold text-neutral-700">
+                  {selectedAfterPhoto?.date} &bull; {selectedAfterPhoto?.weightKg} kg
+                </span>
+              </div>
+              <div 
+                onClick={() => selectedAfterPhoto && setEnlargedPhoto(selectedAfterPhoto.frontUrl)}
+                className="relative aspect-[3/4] bg-neutral-100 rounded-lg overflow-hidden border border-neutral-200 group cursor-pointer"
+              >
+                <img
+                  src={selectedAfterPhoto?.frontUrl}
+                  alt="Current physique"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-neutral-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Maximize2 className="w-6 h-6 text-white" />
+                </div>
+              </div>
+              <p className="text-xs text-neutral-500 mt-2.5 italic">
+                "{selectedAfterPhoto?.notes || 'Latest check-in physique'}"
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 text-center bg-neutral-50 rounded-xl border border-dashed border-neutral-300">
+            <Camera className="w-10 h-10 mx-auto mb-2 text-neutral-400" />
+            <h4 className="text-sm font-bold text-neutral-900">Upload Your Check-In Photos</h4>
+            <p className="text-xs text-neutral-500 max-w-sm mx-auto mt-1 mb-4">
+              Regular photos ensure your coach can audit muscle retention and make precise macro adjustments.
+            </p>
+            <button
+              onClick={() => setShowPhotoModal(true)}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold cursor-pointer shadow-xs"
+            >
+              Upload First Photo
+            </button>
+          </div>
+        )}
+
+        {/* Photo Gallery Strip */}
+        {clientPhotos.length > 0 && (
+          <div className="mt-6 pt-4 border-t border-neutral-200">
+            <h4 className="text-xs font-bold text-neutral-500 uppercase mb-3 tracking-wider">
+              All Photo Check-In Logs ({clientPhotos.length})
+            </h4>
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {clientPhotos.map((photo) => (
+                <div
+                  key={photo.id}
+                  onClick={() => setEnlargedPhoto(photo.frontUrl)}
+                  className="shrink-0 w-28 bg-neutral-50 border border-neutral-200 rounded-lg p-1.5 cursor-pointer hover:border-red-500 transition-colors shadow-xs"
+                >
+                  <img
+                    src={photo.frontUrl}
+                    alt={`Photo ${photo.date}`}
+                    className="w-full h-32 object-cover rounded"
+                  />
+                  <div className="text-[10px] text-center font-bold text-neutral-700 mt-1">
+                    {photo.date}
+                  </div>
+                  <div className="text-[9px] text-center text-red-600 font-semibold">
+                    {photo.weightKg} kg
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal: Log Biometrics */}
+      {showLogModal && (
+        <div className="fixed inset-0 z-50 bg-neutral-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-4 border-b border-neutral-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Scale className="w-5 h-5 text-red-600" />
+                <h3 className="text-base font-bold text-neutral-900">Log Biometric Entry</h3>
+              </div>
+              <button onClick={() => setShowLogModal(false)} className="text-neutral-400 hover:text-neutral-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleLogMetric} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Body Weight (kg) *
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  required
+                  placeholder="e.g. 81.2"
+                  value={newWeight}
+                  onChange={(e) => setNewWeight(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    Waist Circumference (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="e.g. 83.5"
+                    value={newWaist}
+                    onChange={(e) => setNewWaist(e.target.value)}
+                    className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    Chest / Pecs (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="e.g. 104.5"
+                    value={newChest}
+                    onChange={(e) => setNewChest(e.target.value)}
+                    className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Biceps / Arm Flexed (cm)
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  placeholder="e.g. 38.5"
+                  value={newBiceps}
+                  onChange={(e) => setNewBiceps(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Notes & Context (e.g. water retention, morning weigh-in)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Fasted weigh-in after morning hydration..."
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-xs text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLogModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-neutral-600 hover:text-neutral-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-md shadow-red-200 transition-all cursor-pointer"
+                >
+                  Save Measurement
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Upload Progress Photo */}
+      {showPhotoModal && (
+        <div className="fixed inset-0 z-50 bg-neutral-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex items-center justify-between mb-4 border-b border-neutral-200 pb-3">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-red-600" />
+                <h3 className="text-base font-bold text-neutral-900">Upload Physique Photo</h3>
+              </div>
+              <button onClick={() => setShowPhotoModal(false)} className="text-neutral-400 hover:text-neutral-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleLogPhoto} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Front Pose Photo URL *
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://images.unsplash.com/..."
+                  value={photoFrontUrl}
+                  onChange={(e) => setPhotoFrontUrl(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+                <div className="mt-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPhotoFrontUrl('https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=600&auto=format&fit=crop&q=80')}
+                    className="text-[10px] text-red-600 hover:underline cursor-pointer"
+                  >
+                    Use Sample Athlete Photo
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Side or Back Pose Photo URL (Optional)
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://images.unsplash.com/..."
+                  value={photoSideUrl}
+                  onChange={(e) => setPhotoSideUrl(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Weight at Time of Photo (kg)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  placeholder={currentWeight.toString()}
+                  value={photoWeight}
+                  onChange={(e) => setPhotoWeight(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  Notes on Lighting / Physique
+                </label>
+                <input
+                  type="text"
+                  placeholder="Morning natural light, relaxed pose"
+                  value={photoNotes}
+                  onChange={(e) => setPhotoNotes(e.target.value)}
+                  className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-xs text-neutral-900 focus:border-red-600 focus:outline-none placeholder:text-neutral-400"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPhotoModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-neutral-600 hover:text-neutral-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-md shadow-red-200 transition-all cursor-pointer"
+                >
+                  Submit Photo Log
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Enlarged Photo Lightbox */}
+      {enlargedPhoto && (
+        <div 
+          onClick={() => setEnlargedPhoto(null)}
+          className="fixed inset-0 z-50 bg-neutral-900/80 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
+        >
+          <div className="relative max-w-2xl max-h-[85vh]">
+            <img
+              src={enlargedPhoto}
+              alt="Enlarged physique"
+              className="w-full h-full object-contain rounded-xl border border-neutral-200 shadow-2xl"
+            />
+            <button
+              onClick={() => setEnlargedPhoto(null)}
+              className="absolute top-3 right-3 p-2 bg-neutral-900/70 text-white rounded-full hover:bg-neutral-900"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
