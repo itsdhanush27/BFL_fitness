@@ -25,6 +25,7 @@ import massStageImg from '../../assets/founders/mass-stage.png';
 import massGymImg from '../../assets/founders/mass-gym.jpg';
 import pouyaPowerliftingImg from '../../assets/founders/pouya-powerlifting.jpg';
 import pouyaBoxingImg from '../../assets/founders/pouya-boxing.jpg';
+import pouyaPhysiqueImg from '../../assets/founders/pouya-physique.jpg';
 
 export interface AboutCoachProps {
   onExplorePlans?: () => void;
@@ -197,7 +198,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
     }
   ];
 
-  // Pouya Marghzari Media Configurations (Photos + Live Video)
+  // Pouya Marghzari Media Configurations (Photos + Live Videos)
   const pouyaMediaItems: FounderMediaItem[] = [
     {
       id: 'pouya-photo-1',
@@ -224,6 +225,19 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       founderRole: 'Founder & Coach'
     },
     {
+      id: 'pouya-photo-3',
+      type: 'image',
+      label: 'Physique & Form',
+      badgeLabel: 'Peak Conditioning Standard',
+      subtitle: 'Lean Muscularity & Combat Conditioning Standard',
+      src: '/assets/founders/6695.jpg',
+      altSrc: pouyaPhysiqueImg || '/assets/founders/pouya-portrait.jpg',
+      objectPosition: 'object-top',
+      fallback: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=900&auto=format&fit=crop&q=80',
+      founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
+      founderRole: 'Founder & Coach'
+    },
+    {
       id: 'pouya-video-1',
       type: 'video',
       label: 'Boxing Reel',
@@ -236,6 +250,20 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
       founderRole: 'Founder & Coach',
       description: 'High-velocity striking combinations, kinetic chain rotational power, and explosive athletic endurance.'
+    },
+    {
+      id: 'pouya-video-2',
+      type: 'video',
+      label: 'Power Drills',
+      badgeLabel: 'Live Combat Drills • Speed',
+      subtitle: 'Punch Sequencing & Dynamic Padwork Drills',
+      src: '/assets/founders/videos/6694.mp4',
+      altSrc: '/assets/founders/videos/pouya-training-2.mp4',
+      poster: '/assets/founders/6695.jpg',
+      objectPosition: 'object-center',
+      founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
+      founderRole: 'Founder & Coach',
+      description: 'Rapid combination punch mechanics, reactive head movement, and high-cadence anaerobic output.'
     }
   ];
 
@@ -245,7 +273,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
   const currentPouyaMedia = pouyaMediaItems[pouyaMediaIdx];
   const pouyaDisplaySrc = pouyaImgError[pouyaMediaIdx] ? (currentPouyaMedia.fallback || currentPouyaMedia.src) : currentPouyaMedia.src;
 
-  // Dedicated "Founders In Action" Video Reel Showcase Cards
+  // Dedicated "Founders In Action" Video Reel Showcase Cards (2 Pouya & 2 Mass)
   const actionReels: FounderActionReel[] = [
     {
       id: 'pouya-striking-reel',
@@ -259,6 +287,19 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       poster: pouyaBoxingImg || '/assets/founders/pouya-boxing.jpg',
       coachKey: 'pouya',
       focusPillars: ['Rotational Force', 'Kinetic Deceleration', 'Speed Endurance']
+    },
+    {
+      id: 'pouya-drills-reel',
+      founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
+      founderRole: 'Founder & Coach',
+      specialtyBadge: 'Power & Combat Drills',
+      title: 'Dynamic Punch Sequencing & Hand Speed',
+      description: 'Live combat training showcasing aggressive punch tempo, core rotational torque, and peak anaerobic capacity.',
+      videoSrc: '/assets/founders/videos/6694.mp4',
+      altVideoSrc: '/assets/founders/videos/pouya-training-2.mp4',
+      poster: '/assets/founders/6695.jpg',
+      coachKey: 'pouya',
+      focusPillars: ['Hand Speed', 'Anaerobic Output', 'Footwork Mechanics']
     },
     {
       id: 'mass-hypertrophy-reel',
@@ -658,7 +699,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
                 <button
                   onClick={() => {
                     // Activate video tab
-                    setPouyaMediaIdx(2);
+                    setPouyaMediaIdx(3);
                     setPouyaVideoPlaying(true);
                   }}
                   className="px-4 py-2.5 rounded-xl bg-red-950/50 hover:bg-red-900/60 text-red-400 hover:text-red-300 border border-red-600/40 font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors"
@@ -814,7 +855,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
                   {pouyaMediaItems.map((item, idx) => {
                     const isSelected = pouyaMediaIdx === idx;
                     return (
@@ -871,8 +912,8 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
             </p>
           </div>
 
-          {/* 3-Card Video Reel Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
+          {/* 4-Card Video Reel Grid (2 Pouya & 2 Mass) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {actionReels.map((reel) => {
               return (
                 <div 
