@@ -11,24 +11,29 @@ import {
   Save, 
   Award,
   Phone,
-  Dumbbell
+  Dumbbell,
+  AlertTriangle,
+  Clock,
+  Lock
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useFitnessData } from '../../context/FitnessDataContext';
+import { useFitnessData, isPlanExpired, getDaysRemaining } from '../../context/FitnessDataContext';
 
 interface ClientProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenCheckout?: (planId?: string) => void;
+  onOpenRenewal?: () => void;
 }
 
 export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
   isOpen,
   onClose,
-  onOpenCheckout
+  onOpenCheckout,
+  onOpenRenewal
 }) => {
   const { user, updateProfile } = useAuth();
-  const { coachingPlans, coaches } = useFitnessData();
+  const { coachingPlans, coaches, clientIntake } = useFitnessData();
 
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
@@ -37,7 +42,14 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
 
   // Find assigned coach
   const assignedCoach = coaches.find(c => c.id === user?.assignedCoachId) || coaches[0];
-  const activePlan = coachingPlans.find(p => p.id === user?.activePlanId) || coachingPlans[1];
+  const activePlan = coachingPlans.find(p => p.id === user?.activePlanId) || coachingPlans[0];
+
+  const isExpired = isPlanExpired(user) || (user as any)?.status === 'expired' || user?.subscriptionStatus === 'expired';
+  const isRenewalPending = user?.subscriptionStatus === 'pending_approval' || (user as any)?.approvalStatus === 'pending';
+  const daysRemaining = getDaysRemaining(user?.planExpiresAt);
+  const expiryFormatted = user?.planExpiresAt 
+    ? new Date(user.planExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
 
   if (!isOpen) return null;
 
@@ -71,27 +83,58 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
         </div>
 
         {/* Subscription Banner */}
-        <div className="bg-gradient-to-r from-red-50/80 via-neutral-50 to-red-50/80 border border-red-200 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className={`border rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          isExpired
+            ? 'bg-red-50 border-red-300'
+            : isRenewalPending
+            ? 'bg-amber-50 border-amber-300'
+            : 'bg-gradient-to-r from-red-50/80 via-neutral-50 to-red-50/80 border-red-200'
+        }`}>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-red-600 uppercase tracking-wider">Active Subscription</span>
-              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold rounded">
-                Active &bull; Auto-renews
+              <span className={`text-xs font-bold uppercase tracking-wider ${isExpired ? 'text-red-700' : isRenewalPending ? 'text-amber-800' : 'text-red-600'}`}>
+                Subscription Status
               </span>
+              {isExpired ? (
+                <span className="px-2 py-0.5 bg-red-100 text-red-800 border border-red-300 text-[10px] font-bold rounded flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 text-red-600" />
+                  Expired
+                </span>
+              ) : isRenewalPending ? (
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold rounded flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-amber-600" />
+                  Renewal Pending
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold rounded flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping inline-block" />
+                  Active
+                </span>
+              )}
             </div>
-            <h3 className="text-sm font-bold text-neutral-900 mt-1">{activePlan?.name || '1-on-1 Elite Coaching'}</h3>
-            <p className="text-xs text-neutral-500">${activePlan?.price || 349}/month &bull; Next billing April 15, 2026</p>
+            <h3 className="text-sm font-bold text-neutral-900 mt-1">
+              {isRenewalPending ? (user?.renewalRequestedPlanName || activePlan?.name) : (activePlan?.name || 'Online Coaching (Monthly)')}
+            </h3>
+            <p className="text-xs text-neutral-600 mt-0.5">
+              ${activePlan?.price || 350} {activePlan?.period || '/ month'}
+              {isExpired && expiryFormatted ? ` • Concluded on ${expiryFormatted}` : ''}
+              {!isExpired && !isRenewalPending && expiryFormatted ? ` • ${daysRemaining} days left (Expires ${expiryFormatted})` : ''}
+            </p>
           </div>
 
           <button
             onClick={() => {
               onClose();
-              onOpenCheckout?.('plan_contest');
+              if (onOpenRenewal) {
+                onOpenRenewal();
+              } else if (onOpenCheckout) {
+                onOpenCheckout('plan_online_monthly');
+              }
             }}
             className="px-3.5 py-1.5 bg-white hover:bg-neutral-100 text-neutral-800 rounded-lg text-xs font-bold border border-neutral-200 transition-colors self-start sm:self-auto cursor-pointer flex items-center gap-1 shadow-xs"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>Change Plan</span>
+            <span>{isExpired ? 'Re-Enroll Package' : 'Change Plan'}</span>
           </button>
         </div>
 
@@ -139,7 +182,7 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
               <input
                 type="email"
                 disabled
-                value={user?.email || 'alex.rivera@example.com'}
+                value={user?.email || clientIntake?.clientEmail || 'athlete@bflfitness.com'}
                 className="w-full bg-neutral-100 border border-neutral-200 rounded-lg px-3 py-2 text-sm text-neutral-500 cursor-not-allowed"
               />
             </div>
@@ -177,10 +220,39 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
               </label>
               <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700 font-bold flex items-center gap-1.5 h-10">
                 <Check className="w-4 h-4 text-emerald-600" />
-                <span>Onboarding Form Approved</span>
+                <span>{clientIntake ? 'Intake Submitted & Synchronized' : 'Onboarding Form Verified'}</span>
               </div>
             </div>
           </div>
+
+          {/* Onboarding Biometrics Snapshot */}
+          {clientIntake && (
+            <div className="p-4 bg-neutral-50 rounded-xl border border-neutral-200 space-y-2">
+              <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block">
+                Onboarding Biometric Submission
+              </span>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-white p-2.5 rounded-lg border border-neutral-200">
+                  <span className="text-[10px] text-neutral-400 block font-semibold">Height / Weight</span>
+                  <span className="font-bold text-neutral-900 font-mono">
+                    {clientIntake.heightCm || '--'}cm / {clientIntake.currentWeightKg || '--'}kg
+                  </span>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-neutral-200">
+                  <span className="text-[10px] text-neutral-400 block font-semibold">Target Weight</span>
+                  <span className="font-bold text-red-600 font-mono">
+                    {clientIntake.targetWeightKg || '--'} kg
+                  </span>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-neutral-200">
+                  <span className="text-[10px] text-neutral-400 block font-semibold">Primary Goal</span>
+                  <span className="font-bold text-neutral-900 uppercase truncate block">
+                    {clientIntake.primaryGoal?.replace(/_/g, ' ') || 'General'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-4 border-t border-neutral-200">
             {saveSuccess ? (

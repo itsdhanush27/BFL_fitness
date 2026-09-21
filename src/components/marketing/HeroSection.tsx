@@ -50,7 +50,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onApply, onExplorePlan
           {/* Action CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
             <button
-              onClick={() => onApply('plan_elite')}
+              onClick={() => onApply('plan_online_monthly')}
               className="w-full sm:w-auto px-8 py-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-base tracking-wide uppercase shadow-md shadow-red-200 transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2 cursor-pointer border border-red-500/40"
             >
               <span>Apply for 1-on-1 Coaching</span>

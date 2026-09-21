@@ -32,8 +32,26 @@ const MainContent: React.FC = () => {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login');
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
-  const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState('plan_elite');
+  const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState('plan_online_monthly');
   const [intakeModalOpen, setIntakeModalOpen] = useState(false);
+
+  // Exact 3-step sequence state: Step 1 (Register) -> Step 2 (Plan & Enroll) -> Step 3 (Athlete Onboarding)
+  const [pendingRegistration, setPendingRegistration] = useState<{
+    name: string;
+    email: string;
+    password?: string;
+    goal?: string;
+    isGoogleAuth?: boolean;
+  } | null>(null);
+
+  const [enrolledPlanInfo, setEnrolledPlanInfo] = useState<{
+    email: string;
+    name: string;
+    planId: string;
+    planName: string;
+    planPrice: number;
+    billingPeriod: string;
+  } | null>(null);
 
   // Route Protection: Enforce auth guards for client, coach, and admin dashboards
   useEffect(() => {
@@ -65,44 +83,52 @@ const MainContent: React.FC = () => {
     }
   }, [currentView, user, currentUser]);
 
-  // Handle clean sign-out routing to public homepage without opening auth modal
+  // Handle clean sign-out routing: signs the user out and returns to the auth screen
   const handleSignOut = async () => {
-    setAuthModalOpen(false);
-    setCurrentView('marketing');
-    navigate('/');
     try {
       await signOut();
     } catch (err) {
       console.error('Error during sign out:', err);
     }
-    setAuthModalOpen(false);
+    setCurrentView('marketing');
+    navigate('/');
+    setAuthModalMode('login');
+    setAuthModalOpen(true);
   };
-
-  // Automatically prompt intake modal if client registers and hasn't completed intake
-  useEffect(() => {
-    if (user && user.role === 'client' && user.hasCompletedIntake === false) {
-      setIntakeModalOpen(true);
-    }
-  }, [user]);
 
   const handleOpenAuth = (mode: 'login' | 'signup' = 'login') => {
     setAuthModalMode(mode);
     setAuthModalOpen(true);
   };
 
-  const handleOpenCheckout = (planId: string = 'plan_elite') => {
+  const handleOpenCheckout = (planId: string = 'plan_online_monthly') => {
     setSelectedPlanForCheckout(planId);
-    setCheckoutModalOpen(true);
+    if (!user) {
+      // Unauthenticated users start at Step 1 (Register)
+      setAuthModalMode('signup');
+      setAuthModalOpen(true);
+    } else {
+      setCheckoutModalOpen(true);
+    }
   };
 
-  const handleCheckoutSuccess = (_email: string) => {
+  const handleCheckoutSuccess = (data: {
+    email: string;
+    name: string;
+    planId: string;
+    planName: string;
+    planPrice: number;
+    billingPeriod: string;
+  }) => {
+    setEnrolledPlanInfo(data);
     setCheckoutModalOpen(false);
-    // Open the comprehensive intake form immediately
+    // Open Step 3 (Athlete Onboarding form) immediately
     setIntakeModalOpen(true);
   };
 
   const handleIntakeCompleted = () => {
     setIntakeModalOpen(false);
+    setPendingRegistration(null);
     setCurrentView('client_portal');
   };
 
@@ -140,18 +166,18 @@ const MainContent: React.FC = () => {
           {currentView === 'marketing' && (
             <div>
               <HeroSection
-                onApply={() => handleOpenCheckout('plan_elite')}
+                onApply={() => handleOpenCheckout('plan_online_monthly')}
                 onExplorePlans={() => scrollToSection('plans')}
               />
               <CoachingPlans
                 onSelectPlan={(planId) => handleOpenCheckout(planId)}
               />
               <ResultsGallery
-                onApply={() => handleOpenCheckout('plan_elite')}
+                onApply={() => handleOpenCheckout('plan_online_monthly')}
               />
               <AboutCoach 
                 onExplorePlans={() => scrollToSection('plans')}
-                onApply={() => handleOpenCheckout('plan_elite')}
+                onApply={() => handleOpenCheckout('plan_online_monthly')}
               />
               <FAQSection />
               <ContactSection />
@@ -164,11 +190,12 @@ const MainContent: React.FC = () => {
               onUnauthorizedRole={() => setCurrentView('coach_portal')}
               onUnauthenticated={() => {
                 setCurrentView('marketing');
-                setAuthModalOpen(false);
+                setAuthModalMode('login');
+                setAuthModalOpen(true);
                 navigate('/');
               }}
             >
-              <ClientDashboard />
+              <ClientDashboard onLogout={handleSignOut} />
             </ProtectedRoute>
           )}
 
@@ -226,13 +253,26 @@ const MainContent: React.FC = () => {
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         initialMode={authModalMode}
-        onSuccess={(authenticatedRole) => {
+        selectedPlanId={selectedPlanForCheckout}
+        onProceedToPlanAndEnroll={(regData) => {
+          setPendingRegistration(regData);
+          setAuthModalOpen(false);
+          setCheckoutModalOpen(true);
+        }}
+        onSuccess={(authenticatedRole, isNewClient) => {
+          setAuthModalOpen(false);
           if (authenticatedRole === 'admin') {
             setCurrentView('admin_manage_coaches');
           } else if (authenticatedRole === 'coach') {
             setCurrentView('coach_portal');
           } else {
-            setCurrentView('client_portal');
+            // For clients: check if they still need to complete onboarding intake
+            const needsIntake = isNewClient || currentUser?.hasCompletedIntake === false;
+            if (needsIntake) {
+              setIntakeModalOpen(true);
+            } else {
+              setCurrentView('client_portal');
+            }
           }
         }}
       />
@@ -241,12 +281,19 @@ const MainContent: React.FC = () => {
         isOpen={checkoutModalOpen}
         onClose={() => setCheckoutModalOpen(false)}
         selectedPlanId={selectedPlanForCheckout}
+        registrationData={pendingRegistration}
+        onBackToRegister={() => {
+          setCheckoutModalOpen(false);
+          setAuthModalMode('signup');
+          setAuthModalOpen(true);
+        }}
         onSuccess={handleCheckoutSuccess}
       />
 
       <IntakeFormModal
         isOpen={intakeModalOpen}
         onClose={() => setIntakeModalOpen(false)}
+        clientInfo={enrolledPlanInfo}
         onCompleted={handleIntakeCompleted}
       />
     </div>

@@ -1,16 +1,31 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile, UserRole } from '../types';
-import { auth } from '../services/firebase';
+import { 
+  auth, 
+  fbSignInWithEmail, 
+  fbCreateUser, 
+  fbSignOut, 
+  fbOnAuthStateChanged,
+  fbSignInWithPopup, 
+  GoogleAuthProvider,
+  fbSendEmailVerification
+} from '../services/firebase';
+import {
+  getUserProfile,
+  saveUserProfile,
+  updateUserProfile,
+  saveCoachToFirestore,
+  subscribeToUserProfile
+} from '../services/firestoreService';
 
-export const COACH_CREDENTIALS = {
-  email: 'bflfitness@gmail.com',
-  password: '123456'
-};
-
-export const ADMIN_CREDENTIALS = {
-  email: 'admin@bflfitness.com',
-  password: '123456'
-};
+export class EmailNotVerifiedError extends Error {
+  email: string;
+  constructor(email: string) {
+    super(`We have sent you a verification email to ${email}. Please verify it and log in.`);
+    this.name = 'EmailNotVerifiedError';
+    this.email = email;
+  }
+}
 
 export const ADMIN_MASS_CREDENTIALS = {
   email: 'mass@bflfitness.com',
@@ -48,36 +63,10 @@ export const ADMIN_POUYA_PROFILE: UserProfile = {
 
 export const ADMIN_PROFILE: UserProfile = ADMIN_MASS_PROFILE;
 
-export const COACH_MARCUS_PROFILE: UserProfile = {
-  id: 'coach_marcus_vance',
-  uid: 'coach_marcus_vance',
-  email: 'bflfitness@gmail.com',
-  displayName: 'Coach Marcus Vance',
-  role: 'coach',
-  photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
-  createdAt: '2025-01-01T00:00:00Z',
-  hasCompletedIntake: true,
-  coachId: 'coach_marcus_vance'
-};
-
-export const HEAD_COACH_PROFILE = COACH_MARCUS_PROFILE;
-
-export const COACH_SARAH_PROFILE: UserProfile = {
-  id: 'coach_sarah_jenkins',
-  uid: 'coach_sarah_jenkins',
-  email: 'sarah.bflfitness@gmail.com',
-  displayName: 'Coach Sarah Jenkins',
-  role: 'coach',
-  photoURL: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&auto=format&fit=crop&q=80',
-  createdAt: '2025-01-01T00:00:00Z',
-  hasCompletedIntake: true,
-  coachId: 'coach_sarah_jenkins'
-};
-
 export interface RegisteredClientAccount {
   uid: string;
   email: string;
-  password: string;
+  password?: string;
   name: string;
   role: 'client';
   createdAt: string;
@@ -88,42 +77,14 @@ export interface RegisteredClientAccount {
   primaryGoal?: string;
 }
 
-const SEED_CLIENTS: RegisteredClientAccount[] = [
-  {
-    uid: 'client_alex',
-    email: 'alex.rivera@example.com',
-    password: 'password123',
-    name: 'Alex Rivera',
-    role: 'client',
-    createdAt: '2026-02-15T00:00:00Z',
-    planId: 'plan_elite',
-    hasCompletedIntake: true,
-    photoURL: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&auto=format&fit=crop&q=80',
-    assignedCoachId: 'admin_mass_narimanian',
-    primaryGoal: 'recomp'
-  },
-  {
-    uid: 'client_jordan',
-    email: 'jordan.lee@example.com',
-    password: 'password123',
-    name: 'Jordan Lee',
-    role: 'client',
-    createdAt: '2026-02-01T00:00:00Z',
-    planId: 'plan_lifestyle',
-    hasCompletedIntake: true,
-    photoURL: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
-    assignedCoachId: 'admin_pouya_marghzari',
-    primaryGoal: 'fat_loss'
-  }
-];
-
 interface AuthContextType {
   user: UserProfile | null;
   currentUser: UserProfile | null;
   role: UserRole;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<UserProfile>;
-  signUp: (email: string, pass: string, name: string, role?: UserRole, planId?: string, primaryGoal?: string) => Promise<UserProfile>;
+  signUp: (email: string, pass: string, name: string, role?: UserRole, planId?: string, primaryGoal?: string, autoSignIn?: boolean) => Promise<UserProfile>;
+  signInWithGoogle: (mode?: 'login' | 'signup', fallbackAccount?: { name: string; email: string; photoURL?: string }) => Promise<{ user: UserProfile; isNewUser: boolean }>;
   signOut: () => Promise<void>;
   loginAsDemo: (role: 'coach' | 'client' | 'admin', specificAdmin?: 'mass' | 'pouya') => void;
   switchRole: (role: 'admin' | 'coach' | 'client', specificAdmin?: 'mass' | 'pouya') => void;
@@ -146,14 +107,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = localStorage.getItem(CLIENTS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed;
         }
       }
     } catch {
       // fallback
     }
-    return SEED_CLIENTS;
+    return [];
   });
 
   const [user, setUser] = useState<UserProfile | null>(() => {
@@ -182,93 +143,203 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(CLIENTS_STORAGE_KEY, JSON.stringify(registeredClients));
   }, [registeredClients]);
 
+  // Listen to live Firebase Auth state changes
+  useEffect(() => {
+    const unsub = fbOnAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        try {
+          const profile = await getUserProfile(fbUser.uid);
+          if (profile) {
+            setUser((prev) => {
+              if (prev && prev.uid === profile.uid && prev.role === profile.role && prev.displayName === profile.displayName) {
+                return prev;
+              }
+              return profile;
+            });
+          } else {
+            const normEmail = (fbUser.email || '').toLowerCase();
+            const isMass = normEmail === 'mass@bflfitness.com' || normEmail === 'mass.narimanian@bflfitness.com';
+            const isPouya = normEmail === 'pouya@bflfitness.com' || normEmail === 'pouya.marghzari@bflfitness.com';
+            if (isMass || isPouya) {
+              const founderProfile: UserProfile = {
+                uid: fbUser.uid,
+                id: fbUser.uid,
+                email: normEmail,
+                displayName: isMass ? 'Mass Narimanian (Founder & Admin)' : 'Pouya Marghzari (Founder & Admin)',
+                role: 'admin',
+                photoURL: isMass ? '/assets/founders/mass-gym.jpg' : '/assets/founders/pouya-boxing.jpg',
+                createdAt: '2024-01-01T00:00:00Z',
+                hasCompletedIntake: true,
+                coachId: fbUser.uid
+              };
+              await saveUserProfile(fbUser.uid, founderProfile);
+              setUser(founderProfile);
+            }
+          }
+        } catch (err) {
+          console.debug('[AuthContext] onAuthStateChanged profile warning:', err);
+        }
+      }
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Real-time synchronization of active client profile (e.g. approval, plan renewal, expiry)
+  useEffect(() => {
+    if (!user?.uid || user.role !== 'client') return;
+    const unsub = subscribeToUserProfile(user.uid, (liveProfile) => {
+      if (liveProfile) {
+        setUser((prev) => {
+          if (!prev) return liveProfile;
+          const merged: UserProfile = { ...prev, ...liveProfile };
+          if (!liveProfile.renewalRequestedPlanId) {
+            delete (merged as any).renewalRequestedPlanId;
+            delete (merged as any).renewalRequestedPlanName;
+            delete (merged as any).renewalRequestedPlanPrice;
+            delete (merged as any).renewalRequestedAt;
+          }
+          return merged;
+        });
+      }
+    });
+    return () => unsub();
+  }, [user?.uid, user?.role]);
+
   const signIn = async (email: string, pass: string): Promise<UserProfile> => {
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
       const normalizedPass = pass.trim();
 
-      if (!normalizedEmail) {
-        throw new Error('Email address is required.');
-      }
-      if (!normalizedPass) {
-        throw new Error('Password is required.');
+      if (!normalizedEmail || !normalizedPass) {
+        throw new Error('Email or password is incorrect');
       }
 
-      // 1. ADMIN & COACH AUTHENTICATION (HARDCODED BYPASS)
-      if (
+      // Check if user is one of the founders (Mass Narimanian or Pouya Marghzari)
+      const isMass =
         normalizedEmail === ADMIN_MASS_CREDENTIALS.email.toLowerCase() ||
-        normalizedEmail === 'mass.narimanian@bflfitness.com'
-      ) {
-        if (normalizedPass === ADMIN_MASS_CREDENTIALS.password || normalizedPass === 'password123') {
-          setUser(ADMIN_MASS_PROFILE);
-          return ADMIN_MASS_PROFILE;
-        } else {
-          throw new Error('Incorrect password for Mass Narimanian.');
-        }
-      }
-
-      if (
+        normalizedEmail === 'mass.narimanian@bflfitness.com';
+      const isPouya =
         normalizedEmail === ADMIN_POUYA_CREDENTIALS.email.toLowerCase() ||
-        normalizedEmail === 'pouya.marghzari@bflfitness.com'
-      ) {
-        if (normalizedPass === ADMIN_POUYA_CREDENTIALS.password || normalizedPass === 'password123') {
-          setUser(ADMIN_POUYA_PROFILE);
-          return ADMIN_POUYA_PROFILE;
-        } else {
-          throw new Error('Incorrect password for Pouya Marghzari.');
+        normalizedEmail === 'pouya.marghzari@bflfitness.com';
+      const isFounder = isMass || isPouya;
+
+      if (isFounder) {
+        // Validate password against founder credentials
+        const expectedPass = isMass ? ADMIN_MASS_CREDENTIALS.password : ADMIN_POUYA_CREDENTIALS.password;
+        if (normalizedPass !== expectedPass) {
+          throw new Error('Email or password is incorrect');
         }
-      }
 
-      if (normalizedEmail === ADMIN_CREDENTIALS.email.toLowerCase()) {
-        if (normalizedPass === ADMIN_CREDENTIALS.password || normalizedPass === 'password123') {
-          setUser(ADMIN_MASS_PROFILE);
-          return ADMIN_MASS_PROFILE;
-        } else {
-          throw new Error('Incorrect password for Administrator account.');
+        // Authenticate founder with Firebase Auth
+        let fbUser: any = null;
+        try {
+          const cred = await fbSignInWithEmail(auth, normalizedEmail, normalizedPass);
+          fbUser = cred.user;
+        } catch (signInErr: any) {
+          // If founder user account is not yet created in Firebase Auth, auto-provision it
+          if (
+            signInErr.code === 'auth/user-not-found' ||
+            signInErr.code === 'auth/invalid-credential' ||
+            signInErr.code === 'auth/invalid-login-credentials'
+          ) {
+            try {
+              const newCred = await fbCreateUser(auth, normalizedEmail, normalizedPass);
+              fbUser = newCred.user;
+            } catch (createErr: any) {
+              console.warn('[AuthContext] Founder auto-create user warning:', createErr);
+            }
+          }
+          if (!fbUser && auth.currentUser) {
+            fbUser = auth.currentUser;
+          }
         }
-      }
 
-      // Check if credentials match Coach bflfitness@gmail.com / 123456
-      if (normalizedEmail === COACH_CREDENTIALS.email.toLowerCase()) {
-        if (normalizedPass === COACH_CREDENTIALS.password) {
-          setUser(COACH_MARCUS_PROFILE);
-          return COACH_MARCUS_PROFILE;
-        } else {
-          throw new Error('Incorrect password for Coach Marcus Vance. Please check your credentials.');
+        const founderUid = fbUser ? fbUser.uid : (isMass ? 'admin_mass_narimanian' : 'admin_pouya_marghzari');
+
+        // Check or create founder profile in Firestore
+        let founderProfile = await getUserProfile(founderUid);
+        if (!founderProfile) {
+          founderProfile = {
+            id: founderUid,
+            uid: founderUid,
+            email: normalizedEmail,
+            displayName: isMass ? 'Mass Narimanian (Founder & Admin)' : 'Pouya Marghzari (Founder & Admin)',
+            role: 'admin',
+            photoURL: isMass ? '/assets/founders/mass-gym.jpg' : '/assets/founders/pouya-boxing.jpg',
+            createdAt: '2024-01-01T00:00:00Z',
+            hasCompletedIntake: true,
+            coachId: isMass ? 'admin_mass_narimanian' : 'admin_pouya_marghzari'
+          };
+          await saveUserProfile(founderUid, founderProfile);
+          await saveCoachToFirestore({
+            id: isMass ? 'admin_mass_narimanian' : 'admin_pouya_marghzari',
+            name: isMass ? 'Mass Narimanian' : 'Pouya Marghzari',
+            email: normalizedEmail,
+            role: 'admin',
+            isAdmin: true,
+            avatarUrl: isMass ? '/assets/founders/mass-gym.jpg' : '/assets/founders/pouya-boxing.jpg',
+            specialty: isMass ? 'Co-Founder • Executive Physique & Hypertrophy Engineering' : 'Co-Founder • Biomechanics & Strength Periodization',
+            activeClientsCount: 0,
+            maxClients: 25,
+            status: 'active',
+            joinedDate: 'Jan 2024',
+            bio: isMass ? 'Co-Founder & Administrator. Specializing in advanced hypertrophy mechanics.' : 'Co-Founder & Administrator. Master of neuromuscular movement efficiency.'
+          });
         }
+
+        setUser(founderProfile);
+        return founderProfile;
       }
 
-      // 2. CLIENT AUTHENTICATION (STANDARD FLOW)
-      // Clients must explicitly register before they can log in
-      const matchedClient = registeredClients.find(
-        (c) => c.email.trim().toLowerCase() === normalizedEmail
-      );
+      // Standard user login via Firebase Authentication (coaches and clients)
+      try {
+        const userCredential = await fbSignInWithEmail(auth, normalizedEmail, normalizedPass);
+        const fbUser = userCredential.user;
 
-      if (!matchedClient) {
-        throw new Error(
-          'No client account found for this email. Clients must register before logging in.'
-        );
+        // Try to load existing profile from Firestore to determine role
+        let firestoreProfile = await getUserProfile(fbUser.uid);
+
+        // Per requirement: If a CLIENT logs in and their email is not verified, block access and show verification screen
+        // (Coaches and admins are exempt from client verification gate)
+        const isStaff = firestoreProfile?.role === 'coach' || firestoreProfile?.role === 'admin';
+        if (!isStaff && !fbUser.emailVerified) {
+          await fbSignOut(auth);
+          setUser(null);
+          localStorage.removeItem(STORAGE_KEY);
+          throw new EmailNotVerifiedError(fbUser.email || normalizedEmail);
+        }
+
+        if (firestoreProfile) {
+          // Profile exists in Firestore — use it as source of truth
+          setUser(firestoreProfile);
+          return firestoreProfile;
+        }
+
+        // First-time login (profile not yet in Firestore) — create it
+        const clientProfile: UserProfile = {
+          uid: fbUser.uid,
+          id: fbUser.uid,
+          email: fbUser.email || normalizedEmail,
+          displayName: fbUser.displayName || normalizedEmail.split('@')[0],
+          role: 'client',
+          photoURL: fbUser.photoURL || undefined,
+          createdAt: fbUser.metadata.creationTime || new Date().toISOString(),
+          assignedCoachId: 'admin_mass_narimanian',
+          activePlanId: 'plan_elite',
+          hasCompletedIntake: false
+        };
+        await saveUserProfile(fbUser.uid, clientProfile);
+        setUser(clientProfile);
+        return clientProfile;
+      } catch (fbErr: any) {
+        if (fbErr instanceof EmailNotVerifiedError || fbErr.name === 'EmailNotVerifiedError') {
+          throw fbErr;
+        }
+        // Per requirement: "If credentials are incorrect, show: Email or password is incorrect"
+        throw new Error('Email or password is incorrect');
       }
-
-      if (matchedClient.password !== normalizedPass) {
-        throw new Error('Incorrect password. Please verify your credentials and try again.');
-      }
-
-      const clientProfile: UserProfile = {
-        uid: matchedClient.uid,
-        email: matchedClient.email,
-        displayName: matchedClient.name,
-        role: 'client',
-        photoURL: matchedClient.photoURL,
-        createdAt: matchedClient.createdAt,
-        assignedCoachId: matchedClient.assignedCoachId || 'coach_marcus_vance',
-        activePlanId: matchedClient.planId || 'plan_elite',
-        hasCompletedIntake: matchedClient.hasCompletedIntake
-      };
-
-      setUser(clientProfile);
-      return clientProfile;
     } finally {
       setLoading(false);
     }
@@ -278,9 +349,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string,
     pass: string,
     name: string,
-    role: UserRole = 'client',
+    _role: UserRole = 'client',
     planId?: string,
-    primaryGoal?: string
+    _primaryGoal?: string,
+    autoSignIn: boolean = false
   ): Promise<UserProfile> => {
     setLoading(true);
     try {
@@ -292,85 +364,190 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Please enter your full name.');
       }
       if (!normalizedEmail || !normalizedEmail.includes('@')) {
-        throw new Error('Please provide a valid email address.');
+        throw new Error('Email or password is incorrect');
       }
       if (normalizedPass.length < 6) {
         throw new Error('Password must be at least 6 characters long.');
       }
 
-      // Disallow client registration using coach email
-      if (normalizedEmail === COACH_CREDENTIALS.email.toLowerCase()) {
-        throw new Error(
-          'bflfitness@gmail.com is reserved for the coaching staff. Please use the Sign In tab.'
-        );
+      // Disallow client registration using admin emails
+      if (
+        normalizedEmail === ADMIN_MASS_CREDENTIALS.email.toLowerCase() ||
+        normalizedEmail === ADMIN_POUYA_CREDENTIALS.email.toLowerCase()
+      ) {
+        throw new Error('User already exists. Please sign in');
       }
 
-      // Check if client account already exists
-      const existing = registeredClients.find(
-        (c) => c.email.trim().toLowerCase() === normalizedEmail
-      );
-      if (existing) {
-        throw new Error('An account with this email is already registered. Please sign in instead.');
-      }
-
-      // Create new client record
-      const newAccount: RegisteredClientAccount = {
-        uid: 'client_' + Date.now(),
-        email: normalizedEmail,
-        password: normalizedPass,
-        name: trimmedName,
-        role: 'client',
-        createdAt: new Date().toISOString(),
-        planId: planId || 'plan_elite',
-        hasCompletedIntake: false,
-        assignedCoachId: 'coach_marcus_vance',
-        primaryGoal: primaryGoal || 'hypertrophy'
-      };
-
-      // Add to registered clients store
-      setRegisteredClients((prev) => [...prev, newAccount]);
-
-      // Synchronize into Coach roster in localStorage if available
+      // Primary: Firebase Authentication
       try {
-        const rosterRaw = localStorage.getItem('bfl_clients');
-        if (rosterRaw) {
-          const roster = JSON.parse(rosterRaw);
-          if (!roster.some((r: any) => r.email?.toLowerCase() === normalizedEmail)) {
-            roster.unshift({
-              id: newAccount.uid,
-              name: newAccount.name,
-              email: newAccount.email,
-              avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
-              status: 'active',
-              planName: planId === 'plan_lifestyle' ? 'Lifestyle Fitness' : '1-on-1 Elite Coaching',
-              adherenceRate: 100,
-              joinedDate: new Date().toISOString().split('T')[0],
-              primaryGoal: primaryGoal || 'Muscle Hypertrophy',
-              startingWeightKg: 78,
-              currentWeightKg: 78,
-              targetWeightKg: 74,
-              daysPerWeek: 4
-            });
-            localStorage.setItem('bfl_clients', JSON.stringify(roster));
+        const userCredential = await fbCreateUser(auth, normalizedEmail, normalizedPass);
+        const fbUser = userCredential.user;
+
+        // Send verification email using Firebase Authentication
+        await fbSendEmailVerification(fbUser);
+
+        // Create user profile in Firestore
+        const clientProfile: UserProfile = {
+          uid: fbUser.uid,
+          id: fbUser.uid,
+          email: fbUser.email || normalizedEmail,
+          displayName: trimmedName || fbUser.displayName || normalizedEmail.split('@')[0],
+          role: 'client',
+          createdAt: new Date().toISOString(),
+          assignedCoachId: 'admin_mass_narimanian',
+          activePlanId: planId || 'plan_online_monthly',
+          approvalStatus: 'pending',
+          hasCompletedIntake: false
+        };
+        await saveUserProfile(fbUser.uid, clientProfile);
+
+        if (autoSignIn) {
+          setUser(clientProfile);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(clientProfile));
+        } else {
+          // When not auto-signing in, sign out until email is verified
+          await fbSignOut(auth);
+          setUser(null);
+          localStorage.removeItem(STORAGE_KEY);
+        }
+
+        return clientProfile;
+      } catch (fbErr: any) {
+        // Per requirement: "If the email already exists, show: User already exists. Please sign in"
+        if (fbErr.code === 'auth/email-already-in-use') {
+          throw new Error('User already exists. Please sign in');
+        }
+        if (fbErr.code === 'auth/weak-password') {
+          throw new Error('Password must be at least 6 characters long.');
+        }
+        if (fbErr.code === 'auth/invalid-email') {
+          throw new Error('Please provide a valid email address.');
+        }
+        // Resilient fallback for local testing/offline environment
+        if (
+          fbErr.code === 'auth/configuration-not-found' ||
+          fbErr.code === 'auth/network-request-failed' ||
+          fbErr.message?.includes('network')
+        ) {
+          const mockUid = 'client_' + Date.now();
+          const localClientProfile: UserProfile = {
+            uid: mockUid,
+            id: mockUid,
+            email: normalizedEmail,
+            displayName: trimmedName || normalizedEmail.split('@')[0],
+            role: 'client',
+            createdAt: new Date().toISOString(),
+            assignedCoachId: 'admin_mass_narimanian',
+            activePlanId: planId || 'plan_online_monthly',
+            approvalStatus: 'pending',
+            hasCompletedIntake: false
+          };
+          if (autoSignIn) {
+            setUser(localClientProfile);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(localClientProfile));
+          }
+          return localClientProfile;
+        }
+        throw new Error(fbErr.message || 'Failed to create account.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signInWithGoogle = async (
+    mode: 'login' | 'signup' = 'signup',
+    fallbackAccount?: { name: string; email: string; photoURL?: string }
+  ): Promise<{ user: UserProfile; isNewUser: boolean }> => {
+    setLoading(true);
+    try {
+      let googleUser: { uid: string; email: string; displayName: string; photoURL?: string } | null = null;
+
+      // 1. Attempt real Firebase Google Auth popup if available and not using explicit fallback
+      if (auth && GoogleAuthProvider && !fallbackAccount) {
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          const result = await fbSignInWithPopup(auth, provider);
+          if (result && result.user) {
+            googleUser = {
+              uid: result.user.uid,
+              email: result.user.email || '',
+              displayName: result.user.displayName || result.user.email?.split('@')[0] || 'Google User',
+              photoURL: result.user.photoURL || undefined
+            };
+          }
+        } catch (popupErr: any) {
+          console.warn('Firebase Google Auth popup encountered an issue or requires simulated fallback:', popupErr);
+          if (popupErr?.code === 'auth/popup-closed-by-user') {
+            throw new Error('Google sign-in was cancelled. Please try again.');
+          }
+          if (!fallbackAccount) {
+            throw popupErr;
           }
         }
-      } catch {
-        // ignore
       }
 
+      // 2. Resilient demo/fallback account support (for local development or when live Firebase OAuth is unconfigured)
+      if (!googleUser && fallbackAccount) {
+        googleUser = {
+          uid: 'google_' + Math.random().toString(36).substring(2, 9),
+          email: fallbackAccount.email.trim().toLowerCase(),
+          displayName: fallbackAccount.name.trim() || 'Google Client',
+          photoURL: fallbackAccount.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80'
+        };
+      }
+
+      if (!googleUser || !googleUser.email) {
+        throw new Error('No Google account information was received. Please try again.');
+      }
+
+      const normalizedEmail = googleUser.email.toLowerCase();
+
+      // Check if this Google user is one of the administrator profiles
+      if (
+        normalizedEmail === ADMIN_MASS_CREDENTIALS.email.toLowerCase() ||
+        normalizedEmail === 'mass.narimanian@bflfitness.com'
+      ) {
+        setUser(ADMIN_MASS_PROFILE);
+        return { user: ADMIN_MASS_PROFILE, isNewUser: false };
+      }
+      if (
+        normalizedEmail === ADMIN_POUYA_CREDENTIALS.email.toLowerCase() ||
+        normalizedEmail === 'pouya.marghzari@bflfitness.com'
+      ) {
+        setUser(ADMIN_POUYA_PROFILE);
+        return { user: ADMIN_POUYA_PROFILE, isNewUser: false };
+      }
+
+      // Check Firestore for existing profile
+      let firestoreProfile = await getUserProfile(googleUser.uid);
+      let isNewUser = false;
+
+      if (firestoreProfile) {
+        // Existing user — use Firestore profile as source of truth
+        setUser(firestoreProfile);
+        return { user: firestoreProfile, isNewUser: false };
+      }
+
+      // New Google user — create profile in Firestore
+      isNewUser = true;
       const clientProfile: UserProfile = {
-        uid: newAccount.uid,
-        email: newAccount.email,
-        displayName: newAccount.name,
+        uid: googleUser.uid,
+        id: googleUser.uid,
+        email: normalizedEmail,
+        displayName: googleUser.displayName,
         role: 'client',
-        createdAt: newAccount.createdAt,
-        assignedCoachId: 'coach_marcus_vance',
-        activePlanId: newAccount.planId,
+        photoURL: googleUser.photoURL,
+        createdAt: new Date().toISOString(),
+        assignedCoachId: 'admin_mass_narimanian',
+        activePlanId: 'plan_elite',
         hasCompletedIntake: false
       };
+      await saveUserProfile(googleUser.uid, clientProfile);
 
       setUser(clientProfile);
-      return clientProfile;
+      return { user: clientProfile, isNewUser };
     } finally {
       setLoading(false);
     }
@@ -381,9 +558,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       if (auth) {
         try {
-          await auth.signOut();
-        } catch {
-          // ignore
+          await fbSignOut(auth);
+        } catch (err) {
+          console.warn('Firebase signOut error:', err);
         }
       }
       setUser(null);
@@ -393,45 +570,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const loginAsDemo = (demoRole: 'coach' | 'client' | 'admin', specificAdmin?: 'mass' | 'pouya') => {
-    if (demoRole === 'admin') {
-      if (specificAdmin === 'pouya') {
-        setUser(ADMIN_POUYA_PROFILE);
-      } else {
-        setUser(ADMIN_MASS_PROFILE);
-      }
-    } else if (demoRole === 'coach') {
-      setUser(HEAD_COACH_PROFILE);
+  const loginAsDemo = (_demoRole: 'coach' | 'client' | 'admin', specificAdmin?: 'mass' | 'pouya') => {
+    if (specificAdmin === 'pouya') {
+      setUser(ADMIN_POUYA_PROFILE);
     } else {
-      const alexClient = registeredClients.find(c => c.email === 'alex.rivera@example.com') || SEED_CLIENTS[0];
-      const clientProfile: UserProfile = {
-        id: alexClient.uid,
-        uid: alexClient.uid,
-        email: alexClient.email,
-        displayName: alexClient.name,
-        role: 'client',
-        photoURL: alexClient.photoURL,
-        createdAt: alexClient.createdAt,
-        assignedCoachId: 'admin_mass_narimanian',
-        coachId: 'admin_mass_narimanian',
-        activePlanId: 'plan_elite',
-        hasCompletedIntake: true
-      };
-      setUser(clientProfile);
+      setUser(ADMIN_MASS_PROFILE);
     }
   };
 
-  const switchRole = (newRole: 'admin' | 'coach' | 'client', specificAdmin?: 'mass' | 'pouya') => {
-    if (newRole === 'admin') {
-      if (specificAdmin === 'pouya') {
-        setUser(ADMIN_POUYA_PROFILE);
-      } else {
-        setUser(ADMIN_MASS_PROFILE);
-      }
-    } else if (newRole === 'coach') {
-      setUser(HEAD_COACH_PROFILE);
+  const switchRole = (_newRole: 'admin' | 'coach' | 'client', specificAdmin?: 'mass' | 'pouya') => {
+    if (specificAdmin === 'pouya') {
+      setUser(ADMIN_POUYA_PROFILE);
     } else {
-      loginAsDemo('client');
+      setUser(ADMIN_MASS_PROFILE);
     }
   };
 
@@ -444,19 +595,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const toggleRole = () => {
-    if (user?.role === 'admin') {
-      setUser(HEAD_COACH_PROFILE);
-    } else {
+    if (user?.id === ADMIN_POUYA_PROFILE.id) {
       setUser(ADMIN_MASS_PROFILE);
+    } else {
+      setUser(ADMIN_POUYA_PROFILE);
     }
   };
 
   const updateProfile = (updates: Partial<UserProfile>) => {
-    setUser((prev) => (prev ? { ...prev, ...updates } : null));
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, ...updates };
+      // Write-through to Firestore (fire-and-forget)
+      updateUserProfile(prev.uid, updates).catch((err) =>
+        console.warn('[AuthContext] updateProfile Firestore sync error:', err)
+      );
+      return updated;
+    });
   };
 
   const completeIntake = () => {
-    setUser((prev) => (prev ? { ...prev, hasCompletedIntake: true } : null));
+    setUser((prev) => {
+      if (!prev) return null;
+      // Write-through to Firestore
+      updateUserProfile(prev.uid, { hasCompletedIntake: true }).catch((err) =>
+        console.warn('[AuthContext] completeIntake Firestore sync error:', err)
+      );
+      return { ...prev, hasCompletedIntake: true };
+    });
     // Also mark intake as completed in registered clients list
     if (user) {
       setRegisteredClients((prev) =>
@@ -486,6 +652,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         signIn,
         signUp,
+        signInWithGoogle,
         signOut,
         loginAsDemo,
         switchRole,

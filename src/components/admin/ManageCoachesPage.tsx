@@ -13,8 +13,10 @@ import {
   AlertCircle,
   Award,
   ArrowLeft,
-  Settings
+  Settings,
+  CloudUpload
 } from 'lucide-react';
+import { seedFoundersAndCoachesToFirestore } from '../../services/firestoreService';
 
 interface ManageCoachesPageProps {
   onNavigate?: (view: any) => void;
@@ -29,13 +31,31 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
   const [showAddForm, setShowAddForm] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'coach' | 'nutritionist'>('coach');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'coach' | 'admin' | 'nutritionist'>('coach');
   const [specialty, setSpecialty] = useState('');
   const [maxClients, setMaxClients] = useState<number>(20);
   const [avatarUrl, setAvatarUrl] = useState('');
   const [bio, setBio] = useState('');
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+
+  const handleSyncToFirestore = async () => {
+    setSyncLoading(true);
+    setSyncSuccess(null);
+    try {
+      await seedFoundersAndCoachesToFirestore();
+      setSyncSuccess('Staff & Founders Synced to Cloud Firestore!');
+    } catch (err: any) {
+      setSyncSuccess(`Sync note: ${err.message || 'Make sure Firestore rules are published'}`);
+    } finally {
+      setSyncLoading(false);
+      setTimeout(() => setSyncSuccess(null), 3500);
+    }
+  };
 
   const presetAvatars = [
     { label: 'Male Athletic 1', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80' },
@@ -44,7 +64,7 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
     { label: 'Male Strength', url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80' }
   ];
 
-  const handleCreateCoach = (e: React.FormEvent) => {
+  const handleCreateCoach = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
 
@@ -56,6 +76,10 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
       setFormError('A valid email address is required.');
       return;
     }
+    if (!password.trim() || password.trim().length < 6) {
+      setFormError('Portal login password must be at least 6 characters.');
+      return;
+    }
     if (!specialty.trim()) {
       setFormError('Please specify the coach specialty area.');
       return;
@@ -63,35 +87,44 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
 
     const finalAvatar = avatarUrl.trim() || presetAvatars[0].url;
 
-    addCoach({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      role,
-      specialty: specialty.trim(),
-      maxClients: Number(maxClients) || 20,
-      activeClientsCount: 0,
-      status: 'active',
-      avatarUrl: finalAvatar,
-      bio: bio.trim() || 'Certified elite transformation specialist.'
-    });
+    setIsSubmitting(true);
+    try {
+      await addCoach({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+        role,
+        specialty: specialty.trim(),
+        maxClients: Number(maxClients) || 20,
+        activeClientsCount: 0,
+        status: 'active',
+        avatarUrl: finalAvatar,
+        bio: bio.trim() || 'Certified elite transformation specialist.'
+      });
 
-    // Reset Form
-    setName('');
-    setEmail('');
-    setRole('coach');
-    setSpecialty('');
-    setMaxClients(20);
-    setAvatarUrl('');
-    setBio('');
-    setFormSuccess(true);
-    setTimeout(() => {
-      setFormSuccess(false);
-      setShowAddForm(false);
-    }, 1800);
+      // Reset Form
+      setName('');
+      setEmail('');
+      setPassword('');
+      setRole('coach');
+      setSpecialty('');
+      setMaxClients(20);
+      setAvatarUrl('');
+      setBio('');
+      setFormSuccess(true);
+      setTimeout(() => {
+        setFormSuccess(false);
+        setShowAddForm(false);
+      }, 1800);
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to create coach account.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const totalClientsCap = coaches.reduce((acc, c) => acc + c.maxClients, 0);
-  const totalActiveAssigned = coaches.reduce((acc, c) => acc + c.activeClientsCount, 0);
+  const totalActiveAssigned = clients.length;
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 pb-24">
@@ -137,6 +170,17 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
               </div>
             </div>
 
+            <button
+              type="button"
+              disabled={syncLoading}
+              onClick={handleSyncToFirestore}
+              className="px-3.5 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all cursor-pointer border border-neutral-300 disabled:opacity-50"
+              title="Push Founders and Coaching Staff to Cloud Firestore"
+            >
+              <CloudUpload className="w-4 h-4 text-red-600" />
+              <span>{syncLoading ? 'Syncing...' : 'Sync to Firestore'}</span>
+            </button>
+
             {onNavigateToCMS && (
               <button
                 onClick={onNavigateToCMS}
@@ -160,6 +204,12 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
+        {syncSuccess && (
+          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2 shadow-xs">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{syncSuccess}</span>
+          </div>
+        )}
         {/* Quick Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
@@ -277,6 +327,22 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
 
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-neutral-700 mb-2">
+                    Login Password *
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Minimum 6 characters for portal login"
+                    required
+                    minLength={6}
+                    className="w-full px-4 py-3 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 text-xs focus:bg-white focus:border-red-600 focus:outline-none"
+                  />
+                  <p className="text-[11px] text-neutral-500 mt-1">Credentials stored in Firebase Authentication for coach login.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-700 mb-2">
                     Role Category
                   </label>
                   <select
@@ -285,6 +351,7 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
                     className="w-full px-4 py-3 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 text-xs focus:bg-white focus:border-red-600 focus:outline-none cursor-pointer"
                   >
                     <option value="coach">Fitness & Hypertrophy Coach</option>
+                    <option value="admin">Platform Administrator & Coach</option>
                     <option value="nutritionist">Registered Nutritionist / Dietitian</option>
                   </select>
                 </div>
@@ -368,10 +435,20 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-sm cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-sm cursor-pointer disabled:cursor-not-allowed"
                 >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Save & Deploy Coach</span>
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Provisioning Firebase Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      <span>Save & Deploy Coach</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -408,7 +485,9 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
               </thead>
               <tbody className="divide-y divide-neutral-200 text-xs">
                 {coaches.map((coach) => {
-                  const percentCapacity = Math.round((coach.activeClientsCount / coach.maxClients) * 100);
+                  const realAssignedCount = clients.filter(c => (c.coachId || c.assignedCoachId) === coach.id).length;
+                  const activeCount = realAssignedCount > 0 ? realAssignedCount : coach.activeClientsCount;
+                  const percentCapacity = Math.round((activeCount / coach.maxClients) * 100);
                   const isSelf = currentUser?.id === coach.id || currentUser?.email === coach.email;
 
                   return (
@@ -457,7 +536,7 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
                       <td className="py-4 px-6">
                         <div className="w-36">
                           <div className="flex items-center justify-between text-[11px] font-mono mb-1">
-                            <span className="font-bold text-neutral-800">{coach.activeClientsCount} / {coach.maxClients}</span>
+                            <span className="font-bold text-neutral-800">{activeCount} / {coach.maxClients}</span>
                             <span className="text-neutral-500">{percentCapacity}%</span>
                           </div>
                           <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">

@@ -69,8 +69,8 @@ export const INITIAL_CLIENTS: ClientRosterItem[] = [
     injuryNotes: 'None reported. 100% biomechanical clearance for all compound lifts.',
     daysPerWeek: 5,
     availableEquipment: ['Commercial Gym', 'Full Free Weights', 'Cardio Suite'],
-    assignedCoachId: 'coach_marcus_vance',
-    coachId: 'coach_marcus_vance'
+    assignedCoachId: 'admin_mass_narimanian',
+    coachId: 'admin_mass_narimanian'
   },
   {
     id: 'client_sophia',
@@ -88,64 +88,140 @@ export const INITIAL_CLIENTS: ClientRosterItem[] = [
     injuryNotes: 'None. Prefers RDLs and hip thrusts with barbell pad.',
     daysPerWeek: 4,
     availableEquipment: ['Commercial Gym', 'Barbells', 'Cables', 'Machines'],
-    assignedCoachId: 'coach_sarah_jenkins',
-    coachId: 'coach_sarah_jenkins'
+    assignedCoachId: 'admin_pouya_marghzari',
+    coachId: 'admin_pouya_marghzari'
   }
 ];
 
 export const INITIAL_COACHING_PLANS: CoachingPlan[] = [
   {
-    id: 'plan_lifestyle',
-    name: 'Performance & Lifestyle',
-    tagline: 'Sustainable body recomposition & habits for busy professionals',
-    price: 199,
-    period: '/ month',
+    id: 'plan_f2f_hourly',
+    name: 'Face-to-Face 1-on-1 (Hourly)',
+    tagline: 'Private in-person coaching session for biomechanics, lifting technique & intensity',
+    price: 80,
+    period: '/ hour',
+    category: 'face_to_face',
+    billingCycle: 'hourly',
     features: [
-      'Custom 3 to 4-day workout split tailored to your equipment',
-      'Targeted macro prescription & flexible dieting guidelines',
-      'In-app workout tracking with progressive overload metrics',
-      'Bi-weekly video check-in & progress review',
-      'Form analysis via in-app video review (up to 3 lifts/week)',
-      'Direct in-app messaging with coach (response within 24h)'
+      '60 minutes of intensive 1-on-1 private gym coaching',
+      'Hands-on biomechanics audit & neuromuscular cueing',
+      'Real-time form correction & progressive overload guidance',
+      'Custom warm-up & movement prep optimization',
+      'Post-session technique review and exercise recommendations'
     ],
-    idealFor: 'Beginner to intermediate lifters balancing career, family, and physique goals',
-    spotsLeft: 5
+    idealFor: 'Lifters looking for in-person technique mastery, PR attempts, or hands-on coaching',
+    spotsLeft: 8
   },
   {
-    id: 'plan_elite',
-    name: '1-on-1 Elite Coaching',
-    tagline: 'Complete bespoke coaching & daily accountability for maximal hypertrophy & fat loss',
-    price: 349,
-    period: '/ month',
-    popular: true,
+    id: 'plan_f2f_weekly',
+    name: 'Face-to-Face Coaching (Weekly)',
+    tagline: 'Hands-on weekly training block with in-person sessions & full diet oversight',
+    price: 390,
+    period: '/ week',
+    category: 'face_to_face',
+    billingCycle: 'weekly',
     features: [
-      '100% bespoke periodized training blocks updated monthly',
-      'Individualized nutrition coaching & refeed / diet break protocols',
-      'Unlimited video technique and form reviews',
-      'Weekly in-depth biofeedback check-in with video/audio response',
-      'Daily workout compliance tracking & metric adjustments',
-      'Priority direct 1-on-1 chat access (response within 4h)',
-      'Custom cardio, step count, and recovery programming'
+      'Weekly in-person coaching sessions at private gym facility',
+      'Full individualized nutrition & macro blueprint',
+      'Complete weekly workout routine tailored to your split',
+      'Hands-on lifting technique coaching & spot assistance',
+      'Direct in-app messaging & daily accountability'
     ],
-    idealFor: 'Lifters demanding elite physique transformations or overcoming prolonged plateaus',
+    idealFor: 'Clients demanding in-person guidance combined with structured weekly nutrition',
+    spotsLeft: 4
+  },
+  {
+    id: 'plan_f2f_monthly',
+    name: 'Face-to-Face Coaching (Monthly VIP)',
+    tagline: 'Elite all-inclusive in-person coaching, hands-on gym training & full nutrition system',
+    price: 1500,
+    period: '/ month',
+    category: 'face_to_face',
+    billingCycle: 'monthly',
+    features: [
+      'Dedicated in-person gym coaching sessions throughout the month',
+      'Full bespoke nutrition planning, weekly adjustments & diet breaks',
+      'Periodized hypertrophy & strength programming in BFL app',
+      'Hands-on execution of heavy compound lifts & intensity techniques',
+      '24/7 direct coach priority line & lifestyle accountability',
+      'Ongoing body composition & progress tracking audits'
+    ],
+    idealFor: 'VIP executives and athletes seeking maximum in-person results & accountability',
     spotsLeft: 2
   },
   {
-    id: 'plan_contest',
-    name: 'Contest Prep & Recomp',
-    tagline: 'Precision peaking, stage condition, or sub-10% body fat specialization',
-    price: 499,
-    period: '/ month',
+    id: 'plan_online_weekly',
+    name: 'Online Coaching (Weekly)',
+    tagline: 'Full customized nutrition, bespoke exercise program, and weekly audits',
+    price: 99,
+    period: '/ week',
+    category: 'online',
+    billingCycle: 'weekly',
     features: [
-      'Advanced undulating hypertrophy & metabolic conditioning plans',
-      'Daily weight & measurement monitoring with rapid adjustments',
-      'Peak week manipulation protocol (glycogen, sodium, hydration)',
-      'Posing feedback, stage presentation cues & suit guidance',
-      '24/7 direct coach hotline & emergency call access',
-      'Comprehensive post-show reverse dieting & hormone recovery strategy'
+      'Full customized diet & macro prescription',
+      'Full exercise programming tailored to your equipment',
+      'Weekly biofeedback check-ins & video lift audit',
+      'In-app set logging & progressive overload tracking',
+      'Direct messaging with coach (response within 24h)'
     ],
-    idealFor: 'Competitive bodybuilders, physique athletes, or extreme photo-shoot preps',
-    spotsLeft: 1
+    idealFor: 'Athletes wanting complete online nutrition & training guidance with weekly flexibility',
+    spotsLeft: 5
+  },
+  {
+    id: 'plan_online_monthly',
+    name: 'Online Coaching (Monthly)',
+    tagline: 'Complete periodized physique transformation, bespoke nutrition & progressive overload',
+    price: 350,
+    period: '/ month',
+    popular: true,
+    category: 'online',
+    billingCycle: 'monthly',
+    features: [
+      'Full bespoke nutrition protocol & flexible dieting guidelines',
+      'Full periodized monthly workout programming',
+      'Weekly comprehensive video check-ins & biofeedback audits',
+      'Unlimited video form analysis & lifting technique reviews',
+      'Priority direct 1-on-1 coach chat (response within 4h)',
+      'Cardio, step count, and recovery optimization'
+    ],
+    idealFor: 'Dedicated lifters committed to sustainable, elite monthly body recomposition',
+    spotsLeft: 3
+  },
+  {
+    id: 'plan_boxing_f2f',
+    name: 'Boxing 1-on-1 (Face-to-Face)',
+    tagline: 'Authentic competitive boxing instruction, pad work, and athletic conditioning',
+    price: 80,
+    period: '/ hour',
+    category: 'boxing',
+    billingCycle: 'hourly',
+    features: [
+      '60 minutes of 1-on-1 face-to-face boxing instruction',
+      'Pad work, combination drills & kinetic punching mechanics',
+      'Footwork, head movement & defensive positioning',
+      'High-intensity combat conditioning & core endurance',
+      'Led by Founder & competitive boxing specialist Pouya Marghzari'
+    ],
+    idealFor: 'All levels: from beginners learning proper technique to advanced combat athletes',
+    spotsLeft: 6
+  },
+  {
+    id: 'plan_powerlifting',
+    name: 'Powerlifting SBD Coaching',
+    tagline: 'Raw strength peaking, bar-speed mechanics & competition preparation (F2F or Online)',
+    price: 80,
+    period: '/ hour',
+    category: 'powerlifting',
+    billingCycle: 'hourly',
+    features: [
+      'Face-to-Face SBD technical session: $80 / hour',
+      'Weekly Online Coaching option: $99 / week (Full Diet & Exercise)',
+      'Monthly Full Peaking option: $350 / month',
+      'In-depth video velocity & bar-path mechanics analysis',
+      'Meet-day peaking, attempt selection & taper protocols'
+    ],
+    idealFor: 'Powerlifters, strength athletes, and lifters aiming to maximize their 1RM totals',
+    spotsLeft: 4
   }
 ];
 
@@ -552,8 +628,8 @@ export const INITIAL_CHECKINS: WeeklyCheckIn[] = [
 export const INITIAL_MESSAGES: ChatMessage[] = [
   {
     id: 'msg_1',
-    senderId: 'coach_marcus',
-    senderName: 'Coach Marcus Vance',
+    senderId: 'admin_mass_narimanian',
+    senderName: 'Mass Narimanian',
     senderRole: 'coach',
     recipientId: 'client_alex',
     text: 'Hey Alex! Welcome to Block 2. We are bumping the working weight on your compound pressing this week. Let me know how your shoulder feels with the new warm-up protocol.',
@@ -565,15 +641,15 @@ export const INITIAL_MESSAGES: ChatMessage[] = [
     senderId: 'client_alex',
     senderName: 'Alex Rivera',
     senderRole: 'client',
-    recipientId: 'coach_marcus',
+    recipientId: 'admin_mass_narimanian',
     text: 'Coach, that band dislocation and rotator cuff prep was a game changer. Zero joint impingement on the incline press today!',
     timestamp: 'Yesterday at 6:40 PM',
     read: true
   },
   {
     id: 'msg_3',
-    senderId: 'coach_marcus',
-    senderName: 'Coach Marcus Vance',
+    senderId: 'admin_mass_narimanian',
+    senderName: 'Mass Narimanian',
     senderRole: 'coach',
     recipientId: 'client_alex',
     text: 'Love to hear that! Keep pushing the intensity. Remember to log your RPE on the last set so I can audit your fatigue curve.',
@@ -630,7 +706,7 @@ export const INITIAL_CMS_CONTENT: CMSContent = {
   },
 
   // Methodologies & Qualifications
-  coachOriginStory: 'With over a decade in competitive natural bodybuilding and strength & conditioning, Coach Marcus Vance founded BFL Fitness with a singular mission: eliminate the guesswork from fitness. No cookie-cutter PDF meal plans. No generic workout splits. We use clinical biomechanics, individualized metabolic tracking, and continuous data-driven adjustments to ensure you never hit a plateau.',
+  coachOriginStory: 'Founded by Mass Narimanian and Pouya Marghzari, BFL Fitness was created with a singular mission: eliminate the guesswork from fitness. No cookie-cutter PDF meal plans. No generic workout splits. We use clinical biomechanics, individualized metabolic tracking, and continuous data-driven adjustments to ensure you never hit a plateau.',
   coachQualifications: [
     'M.S. Exercise Physiology & Biomechanics',
     'CSCS (Certified Strength & Conditioning Specialist - NSCA)',
@@ -669,7 +745,7 @@ export const INITIAL_CMS_CONTENT: CMSContent = {
       achievement: '-18kg Fat Loss & Abs for the First Time',
       duration: '16 Weeks',
       stats: '96kg → 78kg | Waist: 38" → 31"',
-      quote: 'I spun my wheels for 4 years on random YouTube workouts. Working with BFL was night and day. The in-app tracking and Marcus\'s weekly check-in videos kept me 100% accountable.',
+      quote: 'I spun my wheels for 4 years on random YouTube workouts. Working with BFL was night and day. The in-app tracking and Mass & Pouya\'s weekly check-in videos kept me 100% accountable.',
       beforeImg: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=600&auto=format&fit=crop&q=80',
       afterImg: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=600&auto=format&fit=crop&q=80'
     },
@@ -715,7 +791,7 @@ export const INITIAL_CMS_CONTENT: CMSContent = {
     {
       category: 'Onboarding',
       question: 'How quickly do I get my program after signing up?',
-      answer: 'Immediately upon checkout, your account is generated and you complete the Comprehensive Intake Form. Within 24-48 hours, Coach Marcus audits your intake metrics, builds your personalized periodized block, and schedules your onboarding call.'
+      answer: 'Immediately upon checkout, your account is generated and you complete the Comprehensive Intake Form. Within 24-48 hours, our founders and head coaches audit your intake metrics, build your personalized periodized block, and schedule your onboarding call.'
     },
     {
       category: 'Commitment',
@@ -745,7 +821,7 @@ export const INITIAL_COACHES: CoachMember[] = [
     isAdmin: true,
     avatarUrl: '/assets/founders/mass-gym.jpg',
     specialty: 'Co-Founder • Executive Physique & Hypertrophy Engineering',
-    activeClientsCount: 14,
+    activeClientsCount: 0,
     maxClients: 25,
     status: 'active',
     joinedDate: 'Jan 2024',
@@ -759,50 +835,11 @@ export const INITIAL_COACHES: CoachMember[] = [
     isAdmin: true,
     avatarUrl: '/assets/founders/pouya-boxing.jpg',
     specialty: 'Co-Founder • Biomechanics & Strength Periodization',
-    activeClientsCount: 11,
+    activeClientsCount: 0,
     maxClients: 25,
     status: 'active',
     joinedDate: 'Jan 2024',
     bio: 'Co-Founder & Administrator. Master of neuromuscular movement efficiency, injury rehabilitation, and systematic progressive overload modeling.'
-  },
-  {
-    id: 'coach_marcus_vance',
-    name: 'Coach Marcus Vance',
-    email: 'bflfitness@gmail.com',
-    role: 'coach',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
-    specialty: 'Hypertrophy & Competitive Natural Bodybuilding',
-    activeClientsCount: 18,
-    maxClients: 25,
-    status: 'active',
-    joinedDate: 'Jan 2024',
-    bio: 'Coach. M.S. Exercise Physiology, CSCS, CISSN. Specializing in advanced biomechanics and stubborn muscle growth.'
-  },
-  {
-    id: 'coach_sarah_jenkins',
-    name: 'Coach Sarah Jenkins',
-    email: 'sarah.bflfitness@gmail.com',
-    role: 'coach',
-    avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&auto=format&fit=crop&q=80',
-    specialty: 'Female Body Recomposition & Glute Specialization',
-    activeClientsCount: 12,
-    maxClients: 20,
-    status: 'active',
-    joinedDate: 'Nov 2024',
-    bio: 'Former collegiate track athlete and IFBB Bikini competitor. Specialist in female hormonal balance, reverse dieting, and posterior chain development.'
-  },
-  {
-    id: 'coach_elena_rostova',
-    name: 'Elena Rostova, RD',
-    email: 'elena.nutrition@bflfitness.com',
-    role: 'nutritionist',
-    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&auto=format&fit=crop&q=80',
-    specialty: 'Clinical Sports Dietetics & Metabolic Recovery',
-    activeClientsCount: 22,
-    maxClients: 35,
-    status: 'active',
-    joinedDate: 'Feb 2025',
-    bio: 'Registered Sports Dietitian. Guides macronutrient periodization, gut health, micronutrient optimization, and competition refeed strategies.'
   }
 ];
 
@@ -812,7 +849,7 @@ export const INITIAL_NOTIFICATIONS: InAppNotification[] = [
     userId: 'client_alex',
     recipientRole: 'client',
     title: 'Coach Feedback Ready',
-    message: 'Coach Marcus Vance reviewed your Week 3 check-in: "Outstanding work Alex! Textbook recomposition..."',
+    message: 'Mass Narimanian reviewed your Week 3 check-in: "Outstanding work Alex! Textbook recomposition..."',
     type: 'checkin_feedback',
     timestamp: '2 hours ago',
     read: false,

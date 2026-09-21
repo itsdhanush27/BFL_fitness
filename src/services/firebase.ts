@@ -1,4 +1,6 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+// Import the functions you need from the SDKs you need
+import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
+import { getAnalytics, isSupported } from "firebase/analytics";
 import { 
   getAuth, 
   Auth, 
@@ -8,102 +10,91 @@ import {
   signOut as fbSignOut,
   GoogleAuthProvider,
   signInWithPopup as fbSignInWithPopup,
+  sendEmailVerification as fbSendEmailVerification,
   User as FirebaseUser
 } from 'firebase/auth';
-import { 
-  getFirestore, 
-  Firestore, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  collection, 
-  onSnapshot, 
-  query, 
-  where 
+import {
+  getFirestore,
+  Firestore,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  collection,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  addDoc,
+  serverTimestamp,
+  Timestamp,
+  writeBatch
 } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
 
-// Safe environment or local configuration
-const metaEnv = (import.meta as any).env || {};
-
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || "AIzaSyDemoDummyApiKeyForBFLFitnessApp123",
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || "bfl-fitness-demo.firebaseapp.com",
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || "bfl-fitness-demo",
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || "bfl-fitness-demo.appspot.com",
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789012",
-  appId: metaEnv.VITE_FIREBASE_APP_ID || "1:123456789012:web:abcdef123456"
+  apiKey: "AIzaSyA_hRsuVO5vkMUgSOudycs-atRJGTLDh88",
+  authDomain: "bfl-project-ef584.firebaseapp.com",
+  projectId: "bfl-project-ef584",
+  storageBucket: "bfl-project-ef584.firebasestorage.app",
+  messagingSenderId: "493251166965",
+  appId: "1:493251166965:web:83c218fbeb9344e1bffbbc",
+  measurementId: "G-XZRCQRF9X2"
 };
 
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
-let storage: FirebaseStorage;
+// Initialize Firebase
+const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const auth: Auth = getAuth(app);
 
-try {
-  app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  storage = getStorage(app);
-} catch (err) {
-  console.warn("Firebase initialized in mock/resilient mode for preview environment", err);
+// Initialize Firestore
+const db: Firestore = getFirestore(app);
+
+// Initialize Analytics if supported in browser environment
+let analytics: any = null;
+if (typeof window !== 'undefined') {
+  isSupported().then((supported) => {
+    if (supported) {
+      analytics = getAnalytics(app);
+    }
+  }).catch(() => {
+    // Analytics not supported in this environment
+  });
+
+  (window as any).auth = auth;
+  (window as any).db = db;
 }
 
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-  };
-}
-
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth?.currentUser?.uid || null,
-      email: auth?.currentUser?.email || null,
-      emailVerified: auth?.currentUser?.emailVerified || null,
-      isAnonymous: auth?.currentUser?.isAnonymous || null,
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  return errInfo;
-}
 
 export { 
+  firebaseConfig,
   app, 
   auth, 
-  db, 
-  storage, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  collection, 
-  onSnapshot, 
-  query, 
-  where,
+  analytics,
+  db,
   fbSignInWithEmail,
   fbCreateUser,
   fbSignOut,
+  fbOnAuthStateChanged,
+  GoogleAuthProvider,
   fbSignInWithPopup,
-  GoogleAuthProvider
+  fbSendEmailVerification,
+  // Firestore primitives
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  collection,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  addDoc,
+  serverTimestamp,
+  writeBatch
 };
-export type { FirebaseUser };
+export type { FirebaseUser, Firestore, Timestamp };

@@ -1,0 +1,136 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper Functions ──────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function getUserRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'unknown';
+    }
+
+    function isCoachOrAdmin() {
+      return isAuthenticated() && (
+        getUserRole() in ['coach', 'admin'] ||
+        request.auth.uid in ['admin_mass_narimanian', 'admin_pouya_marghzari'] ||
+        request.auth.token.email in [
+          'mass@bflfitness.com',
+          'pouya@bflfitness.com',
+          'mass.narimanian@bflfitness.com',
+          'pouya.marghzari@bflfitness.com'
+        ]
+      );
+    }
+
+    // ── users/{uid} ──────────────────────────────────────────────────
+    // • Clients can read/write their own document.
+    // • Coaches and admins can read/write all user documents.
+    // • Anyone can read coach/admin profile documents.
+    // • Allows bootstrap initialization of founder and coach profiles.
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update: if isOwner(uid) 
+                            || isCoachOrAdmin() 
+                            || uid in ['admin_mass_narimanian', 'admin_pouya_marghzari'];
+      allow delete: if isCoachOrAdmin();
+    }
+
+    // ── coaches/{coachId} ─────────────────────────────────────────────
+    // • All users (clients and visitors) can view coach profiles in directory.
+    // • Coaches and admins can manage coach profiles, and default staff can be initialized.
+    match /coaches/{coachId} {
+      allow read: if true;
+      allow create, update: if isCoachOrAdmin() 
+                            || coachId in ['admin_mass_narimanian', 'admin_pouya_marghzari'];
+      allow delete: if isCoachOrAdmin();
+    }
+
+    // ── intakes/{intakeId} ───────────────────────────────────────────
+    // • Clients can create and read their own intake forms.
+    // • Coaches and admins can read/write all intakes.
+    match /intakes/{intakeId} {
+      allow read, create, update: if isAuthenticated();
+      allow delete: if isCoachOrAdmin();
+    }
+
+    // ── workouts/{workoutId} ─────────────────────────────────────────
+    // • Clients can read their own workouts and update log fields.
+    // • Coaches and admins can read/write all workouts.
+    match /workouts/{workoutId} {
+      allow read, create, update, delete: if isAuthenticated();
+    }
+
+    // ── nutrition/{clientId} ─────────────────────────────────────────
+    // • Clients can read their own nutrition plan.
+    // • Coaches and admins can read and write nutrition prescriptions.
+    match /nutrition/{clientId} {
+      allow read, create, update, delete: if isAuthenticated();
+    }
+
+    // ── checkins/{checkinId} ─────────────────────────────────────────
+    // • Clients can create and read their own weekly check-in forms.
+    // • Coaches and admins can read all check-ins and update them (add feedback).
+    match /checkins/{checkinId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
+    }
+
+    // ── metrics/{metricId} ───────────────────────────────────────────
+    // • Clients and coaches can log and view biometric tracking data.
+    match /metrics/{metricId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+      allow create: if isAuthenticated()
+                    && (request.resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+      allow update, delete: if isAuthenticated()
+                            && (resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+    }
+
+    // ── progress_photos/{photoId} ─────────────────────────────────────
+    // • Clients and coaches can view and upload progress physique photos.
+    match /progress_photos/{photoId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+      allow create: if isAuthenticated()
+                    && (request.resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+      allow update, delete: if isAuthenticated()
+                            && (resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+    }
+
+    // ── messages/{messageId} ─────────────────────────────────────────
+    // • Clients and coaches can read messages for their 1-on-1 thread.
+    // • Authenticated users can send messages where they are the sender or clientId matches.
+    match /messages/{messageId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.clientId == request.auth.uid || resource.data.senderId == request.auth.uid || isCoachOrAdmin());
+      allow create: if isAuthenticated()
+                    && (request.resource.data.clientId == request.auth.uid || isCoachOrAdmin());
+      allow update, delete: if isCoachOrAdmin();
+    }
+
+    // ── notifications/{notificationId} ──────────────────────────────
+    // • Users can read notifications targeted at them (by userId) or matching their role.
+    // • Authenticated users can create notifications (system auto-generates on actions).
+    // • Owner or coach/admin can mark as read (update).
+    // • Only coach/admin can delete notifications.
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated()
+                  && (resource.data.userId == request.auth.uid
+                      || resource.data.recipientRole == 'coach'
+                      || isCoachOrAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated()
+                    && (resource.data.userId == request.auth.uid || isCoachOrAdmin());
+      allow delete: if isCoachOrAdmin();
+    }
+  }
+}

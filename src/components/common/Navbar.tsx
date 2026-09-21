@@ -38,30 +38,26 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { cmsContent } = useFitnessData();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const activeRole = currentUser?.role || user?.role;
+
   const handleSignOut = async () => {
-    // 1. Explicitly close any auth modal
-    if (setIsAuthModalOpen) {
-      setIsAuthModalOpen(false);
-    }
     setMobileMenuOpen(false);
 
-    // 2. Clear user state
+    if (onSignOut) {
+      onSignOut();
+      return;
+    }
+
     try {
       await signOut();
     } catch (err) {
       console.error('Error signing out:', err);
     }
 
-    // 3. Programmatic navigation to root home page
     setCurrentView('marketing');
     navigate('/');
-
-    // 4. Trigger optional onSignOut callback and ensure modal remains closed
-    if (onSignOut) {
-      onSignOut();
-    }
     if (setIsAuthModalOpen) {
-      setIsAuthModalOpen(false);
+      setIsAuthModalOpen(true);
     }
   };
 
@@ -72,7 +68,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <span className="inline-block w-2 h-2 rounded-full bg-red-600 animate-pulse shadow-sm shadow-red-300" />
         <span className="tracking-wide">{cmsContent?.topAnnouncementBar || 'BFL Coaching Portal MVP • Instant Access for Clients & Coaches'}</span>
         <button 
-          onClick={() => onOpenCheckout?.('plan_elite')}
+          onClick={() => onOpenCheckout?.('plan_online_monthly')}
           className="underline font-bold text-red-700 hover:text-red-800 ml-2 cursor-pointer transition-colors"
         >
           View Coaching Tiers &rarr;
@@ -101,9 +97,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Desktop Navigation Links */}
-          {(currentUser?.role === 'client' || currentUser?.role === 'admin' || currentUser?.role === 'coach') && (
+          {(activeRole === 'client' || activeRole === 'admin' || activeRole === 'coach') && (
             <nav className="hidden md:flex items-center gap-1.5">
-              {currentUser?.role === 'client' && (
+              {activeRole === 'client' && (
                 <button
                   onClick={() => setCurrentView('client_portal')}
                   className={`px-3 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer ${
@@ -117,7 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {(currentUser?.role === 'coach' || currentUser?.role === 'admin') && (
+              {(activeRole === 'coach' || activeRole === 'admin') && (
                 <button
                   onClick={() => setCurrentView('coach_portal')}
                   className={`px-3 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer ${
@@ -131,7 +127,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {currentUser?.role === 'admin' && (
+              {activeRole === 'admin' && (
                 <button
                   onClick={() => setCurrentView('admin_manage_coaches')}
                   className={`px-3 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer ${
@@ -210,7 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   Register
                 </button>
                 <button
-                  onClick={() => onOpenCheckout?.('plan_elite')}
+                  onClick={() => onOpenCheckout?.('plan_online_monthly')}
                   className="px-4 py-2 text-sm font-bold bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-sm shadow-red-200 transition-all cursor-pointer flex items-center gap-1.5 border border-red-500/30"
                 >
                   <CreditCard className="w-4 h-4" />
@@ -246,7 +242,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Mobile Menu Panel */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-white border-b border-neutral-200 px-4 pt-2 pb-6 space-y-3">
-          {currentUser?.role === 'client' && (
+          {activeRole === 'client' && (
             <button
               onClick={() => {
                 setCurrentView('client_portal');
@@ -261,7 +257,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {(currentUser?.role === 'coach' || currentUser?.role === 'admin') && (
+          {(activeRole === 'coach' || activeRole === 'admin') && (
             <button
               onClick={() => {
                 setCurrentView('coach_portal');
@@ -276,7 +272,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {currentUser?.role === 'admin' && (
+          {activeRole === 'admin' && (
             <button
               onClick={() => {
                 setCurrentView('admin_manage_coaches');
@@ -335,7 +331,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
               <button
                 onClick={() => {
-                  onOpenCheckout?.('plan_elite');
+                  onOpenCheckout?.('plan_online_monthly');
                   setMobileMenuOpen(false);
                 }}
                 className="w-full py-2.5 bg-red-600 hover:bg-red-700 font-bold text-white rounded-lg text-xs uppercase tracking-wider text-center shadow-md shadow-red-200 cursor-pointer border border-red-500/40"

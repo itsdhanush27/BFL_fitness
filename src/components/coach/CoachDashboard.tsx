@@ -24,14 +24,24 @@ import {
   UserCheck,
   AlertCircle,
   TrendingUp,
-  ShieldCheck
+  ShieldCheck,
+  Loader2,
+  Lock,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useFitnessData } from '../../context/FitnessDataContext';
-import { WorkoutSession, WorkoutExercise, IntakeFormData, NutritionPlan, ClientRosterItem } from '../../types';
+import { useFitnessData, getDaysRemaining, isPlanExpired } from '../../context/FitnessDataContext';
+import { WorkoutSession, WorkoutExercise, IntakeFormData, NutritionPlan, ClientRosterItem, ChatMessage, WeeklyCheckIn } from '../../types';
 import { ProgressAnalyticsView } from '../client/ProgressAnalyticsView';
 import { CoachTeamManagement } from './CoachTeamManagement';
 import { CMSEditor } from '../admin/CMSEditor';
+import { 
+  subscribeToClientNutrition, 
+  subscribeToMessages, 
+  subscribeToClientCheckIns,
+  subscribeToAthleteWorkouts
+} from '../../services/firestoreService';
 
 interface CoachDashboardProps {
   onNavigateToManageCoaches?: () => void;
@@ -49,7 +59,9 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
 
   const clients = fitnessData?.clients || [];
   const coaches = fitnessData?.coaches || [];
-  const intakeSubmissions = fitnessData?.intakeSubmissions || fitnessData?.intakeForms || [];
+  const intakeForms = fitnessData?.intakeForms || [];
+  const intakeSubmissions = fitnessData?.intakeSubmissions ?? [];
+  const updateIntakeStatus = fitnessData?.updateIntakeStatus;
   const checkIns = fitnessData?.checkIns || [];
   const messages = fitnessData?.messages || [];
   const nutritionPlan = fitnessData?.nutritionPlan;
@@ -60,55 +72,29 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
   const updateCMSContent = fitnessData?.updateCMSContent || fitnessData?.updateCMS;
   const assignWorkoutToClient = fitnessData?.assignWorkoutToClient;
   const assignCoachToClient = fitnessData?.assignCoachToClient;
+  const submitIntakeForm = fitnessData?.submitIntakeForm;
+  const approveAndInitializeClientPlan = fitnessData?.approveAndInitializeClientPlan;
+  const setClientPlanExpired = fitnessData?.setClientPlanExpired;
 
   const [activeTab, setActiveTab] = useState<'clients' | 'builder' | 'checkins' | 'intakes' | 'chat' | 'cms' | 'team' | 'progress'>(initialTab);
 
   // Selected Client for detail viewing
-  const [selectedClientId, setSelectedClientId] = useState<string>(clients[0]?.id || 'client_alex');
+  const [selectedClientId, setSelectedClientId] = useState<string>(clients[0]?.id || '');
   const [clientSearch, setClientSearch] = useState('');
 
   // Program Builder State
-  const [builderWorkoutTitle, setBuilderWorkoutTitle] = useState('Push Strength & Upper Chest Focus');
-  const [builderWorkoutDesc, setBuilderWorkoutDesc] = useState('Emphasizing clavicular head recruitment and progressive bench overloading.');
-  const [builderExercises, setBuilderExercises] = useState<WorkoutExercise[]>([
-    {
-      id: 'ex_builder_1',
-      exerciseName: 'Incline Dumbbell Press (30° Angle)',
-      targetMuscle: 'Upper Chest',
-      equipment: 'Dumbbells & Adjustable Bench',
-      coachNotes: 'Retract scapulae, 3-second eccentric stretch at the bottom.',
-      videoUrl: 'https://youtube.com',
-      restSeconds: 90,
-      sets: [
-        { setNumber: 1, targetReps: '8-10', actualWeightKg: 34, actualReps: 10, actualRpe: 8, completed: false },
-        { setNumber: 2, targetReps: '8-10', actualWeightKg: 34, actualReps: 9, actualRpe: 8.5, completed: false },
-        { setNumber: 3, targetReps: '8-10', actualWeightKg: 34, actualReps: 8, actualRpe: 9, completed: false }
-      ]
-    },
-    {
-      id: 'ex_builder_2',
-      exerciseName: 'Standing Cable Lateral Raises',
-      targetMuscle: 'Lateral Deltoid',
-      equipment: 'Dual Cable Machine',
-      coachNotes: 'Cuffs at wrist level, sweep out wide at 45° scapular plane.',
-      videoUrl: 'https://youtube.com',
-      restSeconds: 60,
-      sets: [
-        { setNumber: 1, targetReps: '12-15', actualWeightKg: 10, actualReps: 15, actualRpe: 8, completed: false },
-        { setNumber: 2, targetReps: '12-15', actualWeightKg: 10, actualReps: 14, actualRpe: 9, completed: false },
-        { setNumber: 3, targetReps: '12-15', actualWeightKg: 10, actualReps: 12, actualRpe: 10, completed: false }
-      ]
-    }
-  ]);
+  const [builderWorkoutTitle, setBuilderWorkoutTitle] = useState('');
+  const [builderWorkoutDesc, setBuilderWorkoutDesc] = useState('');
+  const [builderExercises, setBuilderExercises] = useState<WorkoutExercise[]>([]);
   const [programAssignedSuccess, setProgramAssignedSuccess] = useState(false);
 
   // Nutrition Builder Form State
-  const [nutriCalories, setNutriCalories] = useState(nutritionPlan?.calories ?? 2450);
-  const [nutriProtein, setNutriProtein] = useState(nutritionPlan?.proteinGrams ?? 210);
-  const [nutriCarbs, setNutriCarbs] = useState(nutritionPlan?.carbsGrams ?? 240);
-  const [nutriFat, setNutriFat] = useState(nutritionPlan?.fatGrams ?? 65);
-  const [nutriWater, setNutriWater] = useState(nutritionPlan?.waterLiters ?? 3.5);
-  const [nutriNotes, setNutriNotes] = useState(nutritionPlan?.dailyNotes ?? '');
+  const [nutriCalories, setNutriCalories] = useState<number | ''>('');
+  const [nutriProtein, setNutriProtein] = useState<number | ''>('');
+  const [nutriCarbs, setNutriCarbs] = useState<number | ''>('');
+  const [nutriFat, setNutriFat] = useState<number | ''>('');
+  const [nutriWater, setNutriWater] = useState<number | ''>('');
+  const [nutriNotes, setNutriNotes] = useState('');
   const [nutritionSaved, setNutritionSaved] = useState(false);
 
   // Check-In Response State
@@ -125,22 +111,34 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
   const [cmsBannerNotice, setCmsBannerNotice] = useState(cmsContent?.bannerNotice ?? '');
   const [cmsSaved, setCmsSaved] = useState(false);
 
+  // Nutrition & Messenger real-time state per selected client
+  const [clientNutritionPlan, setClientNutritionPlan] = useState<NutritionPlan | null>(null);
+  const [coachClientMessages, setCoachClientMessages] = useState<ChatMessage[]>([]);
+  const [firestoreCheckIns, setFirestoreCheckIns] = useState<WeeklyCheckIn[]>([]);
+  const [isCheckInsLoaded, setIsCheckInsLoaded] = useState(false);
+  const [checkInFilter, setCheckInFilter] = useState<'all' | 'selected'>('all');
+
   const fallbackClient: ClientRosterItem = {
-    id: 'client_alex',
-    name: 'Alex Rivera',
-    email: 'alex.rivera@example.com',
-    avatarUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&auto=format&fit=crop&q=80',
-    status: 'active',
+    id: '',
+    name: 'Awaiting Athletes',
+    email: 'clients@bflfitness.com',
+    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
+    status: 'pending',
     planName: '1-on-1 Elite Coaching',
-    adherenceRate: 96,
-    joinedDate: 'Jan 15, 2026',
-    primaryGoal: 'Recomposition & Hypertrophy',
-    startingWeightKg: 84.5,
-    currentWeightKg: 81.2,
-    targetWeightKg: 78.0,
-    injuryNotes: 'Mild shoulder sensitivity with wide flat grip.',
-    daysPerWeek: 4,
-    availableEquipment: ['Barbells', 'Dumbbells', 'Cables']
+    adherenceRate: 100,
+    joinedDate: 'Today',
+    primaryGoal: 'Pending Intake',
+    startingWeightKg: 0,
+    currentWeightKg: 0,
+    targetWeightKg: 0,
+    injuryNotes: 'No clients assigned yet.',
+    daysPerWeek: 0,
+    availableEquipment: []
+  };
+
+  const formatGoal = (goal?: string) => {
+    if (!goal) return 'Custom Protocol';
+    return goal.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
   const currentUserId = currentUser?.id || currentUser?.uid || user?.id || user?.uid;
@@ -183,22 +181,179 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
   // If in personal coach view (either coach role or admin switched to personal coach view),
   // only display clients where client.coachId === currentUserId
   // If in admin dashboard mode, display all clients in the system
-  const visibleClients = clients.filter(c => {
-    if (isPersonalCoachView) {
-      const clientCoachId = c.coachId || c.assignedCoachId;
-      return clientCoachId === currentUserId;
+  const visibleClients = React.useMemo(() => {
+    return clients.filter((c) => {
+      if (isPersonalCoachView) {
+        const clientCoachId = c.coachId || c.assignedCoachId;
+        return clientCoachId === currentUserId;
+      }
+      return true; // admin sees all
+    });
+  }, [clients, isPersonalCoachView, currentUserId]);
+
+  const filteredClients = React.useMemo(() => {
+    const q = clientSearch.toLowerCase();
+    return visibleClients.filter(
+      (c) =>
+        (c.name || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.planName || '').toLowerCase().includes(q)
+    );
+  }, [visibleClients, clientSearch]);
+
+  const visibleClientIds = React.useMemo(() => visibleClients.map((c) => c.id).join(','), [visibleClients]);
+
+  React.useEffect(() => {
+    if (visibleClients.length > 0) {
+      if (!selectedClientId || !visibleClients.some((c) => c.id === selectedClientId)) {
+        setSelectedClientId(visibleClients[0].id);
+      }
+    } else if (selectedClientId) {
+      setSelectedClientId('');
     }
-    return true; // admin sees all
-  });
+  }, [visibleClientIds]);
 
-  const filteredClients = visibleClients.filter(c => 
-    (c.name || '').toLowerCase().includes(clientSearch.toLowerCase()) || 
-    (c.email || '').toLowerCase().includes(clientSearch.toLowerCase()) ||
-    (c.planName || '').toLowerCase().includes(clientSearch.toLowerCase())
-  );
+  const selectedClient = visibleClients.find((c) => c.id === selectedClientId) || visibleClients[0] || fallbackClient;
 
-  const selectedClient = visibleClients.find(c => c.id === selectedClientId) || visibleClients[0] || fallbackClient;
-  const selectedCheckIn = checkIns.find(c => c.id === activeCheckInId) || checkIns[0];
+  // Dynamically resolve actual onboarding intake submission for selected client
+  const clientIntake = React.useMemo(() => {
+    if (!selectedClient?.id && !selectedClient?.email) return null;
+    const all = intakeForms.length > 0 ? intakeForms : intakeSubmissions;
+    return (
+      all.find((i) => {
+        if (selectedClient.id && i.clientId === selectedClient.id) return true;
+        if (selectedClient.email && i.clientEmail && i.clientEmail.toLowerCase() === selectedClient.email.toLowerCase()) return true;
+        return false;
+      }) || null
+    );
+  }, [selectedClient, intakeForms, intakeSubmissions]);
+
+  // Real-time Firestore Nutrition subscription for the selected client
+  React.useEffect(() => {
+    if (!selectedClient?.id) {
+      setClientNutritionPlan(null);
+      setNutriCalories('');
+      setNutriProtein('');
+      setNutriCarbs('');
+      setNutriFat('');
+      setNutriWater('');
+      setNutriNotes('');
+      return;
+    }
+    const unsub = subscribeToClientNutrition(selectedClient.id, (plan) => {
+      setClientNutritionPlan(plan);
+      if (plan) {
+        setNutriCalories(plan.calories || '');
+        setNutriProtein(plan.proteinGrams || '');
+        setNutriCarbs(plan.carbsGrams || '');
+        setNutriFat(plan.fatGrams || '');
+        setNutriWater(plan.waterLiters || '');
+        setNutriNotes(plan.dailyNotes || '');
+      } else {
+        setNutriCalories('');
+        setNutriProtein('');
+        setNutriCarbs('');
+        setNutriFat('');
+        setNutriWater('');
+        setNutriNotes('');
+      }
+    });
+    return () => unsub();
+  }, [selectedClient?.id]);
+
+  // Real-time Firestore Workout subscription for the selected client
+  React.useEffect(() => {
+    if (!selectedClient?.id) {
+      setBuilderWorkoutTitle('');
+      setBuilderWorkoutDesc('');
+      setBuilderExercises([]);
+      return;
+    }
+    const unsub = subscribeToAthleteWorkouts(selectedClient.id, (workout) => {
+      if (workout) {
+        setBuilderWorkoutTitle(workout.title || '');
+        setBuilderWorkoutDesc(workout.description || '');
+        setBuilderExercises(workout.exercises || []);
+      } else {
+        setBuilderWorkoutTitle('');
+        setBuilderWorkoutDesc('');
+        setBuilderExercises([]);
+      }
+    });
+    return () => unsub();
+  }, [selectedClient?.id]);
+
+  const handleAutoCalculateMacros = () => {
+    if (!selectedClient?.id) return;
+    const weight = Number(clientIntake?.currentWeightKg || selectedClient.currentWeightKg || 0);
+    if (!weight || weight <= 0) {
+      alert('No body weight recorded for this athlete yet. Please enter target macros manually or await client onboarding intake.');
+      return;
+    }
+    const isCut = (selectedClient.primaryGoal || clientIntake?.primaryGoal || '').toLowerCase().includes('fat') || 
+                  (selectedClient.primaryGoal || clientIntake?.primaryGoal || '').toLowerCase().includes('cut') || 
+                  (selectedClient.primaryGoal || clientIntake?.primaryGoal || '').toLowerCase().includes('loss');
+    const cal = isCut ? Math.round(weight * 26) : Math.round(weight * 32);
+    const prot = Math.round(weight * 2.2);
+    const fat = Math.round(weight * 0.8);
+    const carb = Math.max(100, Math.round((cal - (prot * 4 + fat * 9)) / 4));
+    setNutriCalories(cal);
+    setNutriProtein(prot);
+    setNutriCarbs(carb);
+    setNutriFat(fat);
+    setNutriWater(3.5);
+    setNutriNotes(`Prescribed targets for ${selectedClient.name}. Prioritize lean protein with each feeding.`);
+  };
+
+  // Real-time Firestore Messages subscription for the selected client
+  React.useEffect(() => {
+    if (!selectedClient?.id) return;
+    const unsub = subscribeToMessages(selectedClient.id, (list) => {
+      setCoachClientMessages(list);
+    });
+    return () => unsub();
+  }, [selectedClient?.id]);
+
+  // Real-time Firestore Check-Ins subscription for Coach
+  React.useEffect(() => {
+    const unsub = subscribeToClientCheckIns(null, (list) => {
+      setFirestoreCheckIns(list);
+      setIsCheckInsLoaded(true);
+    });
+    return () => unsub();
+  }, []);
+
+  const allCheckIns = isCheckInsLoaded ? firestoreCheckIns : checkIns;
+  const pendingCheckInsCount = React.useMemo(() => {
+    return allCheckIns.filter((c) => !c.reviewedByCoach && !c.coachFeedback).length;
+  }, [allCheckIns]);
+
+  // Dynamically resolve latest weekly check-in for selected client
+  const latestClientCheckIn = React.useMemo(() => {
+    if (!selectedClient?.id) return null;
+    const clientCheckIns = allCheckIns.filter((c) => c.clientId === selectedClient.id);
+    return clientCheckIns[0] || null;
+  }, [selectedClient?.id, allCheckIns]);
+
+  const baselineStartingWeight = Number(clientIntake?.currentWeightKg || selectedClient.startingWeightKg || selectedClient.currentWeightKg || 0);
+  const currentWeightDisplay = Number(latestClientCheckIn?.weightKg || selectedClient.currentWeightKg || clientIntake?.currentWeightKg || selectedClient.startingWeightKg || 0);
+  const targetGoalWeightDisplay = Number(clientIntake?.targetWeightKg || selectedClient.targetWeightKg || (clientIntake?.currentWeightKg ? clientIntake.currentWeightKg - 5 : (selectedClient.currentWeightKg ? selectedClient.currentWeightKg - 5 : 0)));
+  const availabilityDaysDisplay = clientIntake?.trainingDaysPerWeek || (selectedClient?.daysPerWeek && selectedClient.daysPerWeek > 0 ? selectedClient.daysPerWeek : null);
+  const equipmentDisplay = (clientIntake?.availableEquipment && clientIntake.availableEquipment.length > 0)
+    ? clientIntake.availableEquipment
+    : (selectedClient?.availableEquipment && selectedClient.availableEquipment.length > 0 ? selectedClient.availableEquipment : []);
+  const injuryNotesDisplay = clientIntake?.injuryHistory || clientIntake?.medicalNotes || (selectedClient.injuryNotes && selectedClient.injuryNotes !== 'None reported' && selectedClient.injuryNotes !== 'No clients assigned yet.' ? selectedClient.injuryNotes : (selectedClient?.id ? 'None reported. Cleared for all compound loads.' : 'No clients assigned yet.'));
+
+  const visibleCheckIns = checkInFilter === 'selected' && selectedClient?.id
+    ? allCheckIns.filter(c => c.clientId === selectedClient.id)
+    : allCheckIns;
+  const selectedCheckIn = visibleCheckIns.find(c => c.id === activeCheckInId) || visibleCheckIns[0];
+
+  React.useEffect(() => {
+    if (!activeCheckInId && visibleCheckIns.length > 0) {
+      setActiveCheckInId(visibleCheckIns[0].id);
+    }
+  }, [visibleCheckIns, activeCheckInId]);
 
   const handleAddExerciseToBuilder = () => {
     const newEx: WorkoutExercise = {
@@ -217,12 +372,13 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
   };
 
   const handlePublishWorkout = () => {
-    const targetId = selectedClientId || selectedClient.id || 'client_alex';
+    const targetId = selectedClientId || selectedClient.id;
+    if (!targetId || visibleClients.length === 0) return;
     const newSession: WorkoutSession = {
       id: 'workout_' + Date.now(),
       clientId: targetId,
       assignedDate: 'Today',
-      title: builderWorkoutTitle,
+      title: builderWorkoutTitle || 'Daily Workout Protocol',
       description: builderWorkoutDesc,
       exercises: builderExercises,
       isCompleted: false
@@ -236,20 +392,23 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
 
   const handleSaveNutrition = (e: React.FormEvent) => {
     e.preventDefault();
+    const targetId = selectedClientId || selectedClient.id;
+    if (!targetId || visibleClients.length === 0) return;
     if (updateNutritionPlan) {
       updateNutritionPlan({
-        ...nutritionPlan,
-        calories: nutriCalories,
-        proteinGrams: nutriProtein,
-        carbsGrams: nutriCarbs,
-        fatGrams: nutriFat,
-        waterLiters: nutriWater,
+        ...(clientNutritionPlan || {}),
+        clientId: targetId,
+        calories: Number(nutriCalories) || 0,
+        proteinGrams: Number(nutriProtein) || 0,
+        carbsGrams: Number(nutriCarbs) || 0,
+        fatGrams: Number(nutriFat) || 0,
+        waterLiters: Number(nutriWater) || 0,
         dailyNotes: nutriNotes,
-        updatedAt: 'Just now'
+        updatedAt: new Date().toISOString().split('T')[0]
       });
+      setNutritionSaved(true);
+      setTimeout(() => setNutritionSaved(false), 2000);
     }
-    setNutritionSaved(true);
-    setTimeout(() => setNutritionSaved(false), 2000);
   };
 
   const handleSendCheckInFeedback = (e: React.FormEvent) => {
@@ -266,8 +425,8 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
   const handleSendCoachMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!coachChatInput.trim()) return;
-    const targetId = selectedClientId || selectedClient.id || 'client_alex';
-    if (sendChatMessage) {
+    const targetId = selectedClientId || selectedClient.id;
+    if (sendChatMessage && targetId) {
       sendChatMessage(coachChatInput.trim(), targetId);
     }
     setCoachChatInput('');
@@ -286,6 +445,83 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
     setTimeout(() => setCmsSaved(false), 2000);
   };
 
+  const formatIntakeDate = (dateVal: any) => {
+    if (!dateVal) return 'Recently';
+    if (typeof dateVal === 'string') {
+      return dateVal.includes('T') ? dateVal.split('T')[0] : dateVal;
+    }
+    if (dateVal.seconds) {
+      return new Date(dateVal.seconds * 1000).toISOString().split('T')[0];
+    }
+    return 'Recently';
+  };
+
+  const [initializingIntakeId, setInitializingIntakeId] = useState<string | null>(null);
+
+  const handleInitializeProgram = async (intake: IntakeFormData) => {
+    setInitializingIntakeId(intake.id);
+
+    // 1. Select client for program builder & prefill block title/description
+    if (intake.clientId) {
+      setSelectedClientId(intake.clientId);
+    }
+    if (intake.primaryGoal) {
+      setBuilderWorkoutTitle(`${intake.clientName.split(' ')[0]}'s Initial ${formatGoal(intake.primaryGoal)} Block`);
+      setBuilderWorkoutDesc(`Custom routine tailored to ${intake.trainingDaysPerWeek || 4} days/week split using available ${intake.availableEquipment?.slice(0, 3).join(', ') || 'gym equipment'}.`);
+    }
+
+    // 2. Trigger database mutation: updates status from PENDING_REVIEW to REVIEWED
+    try {
+      if (updateIntakeStatus) {
+        await updateIntakeStatus(intake.id, intake.clientId, 'reviewed');
+      }
+    } catch (err) {
+      console.error('[CoachDashboard] Error updating intake status:', err);
+    } finally {
+      setInitializingIntakeId(null);
+    }
+
+    // 3. Route to Program & Macro Builder tab
+    setActiveTab('builder');
+  };
+
+  const handleSeedDemoIntake = () => {
+    if (!submitIntakeForm) return;
+    const demoId = 'client_demo_' + Date.now();
+    submitIntakeForm({
+      clientId: demoId,
+      clientName: 'Julian Mercer',
+      clientEmail: 'julian.mercer@example.com',
+      age: 29,
+      gender: 'Male',
+      heightCm: 182,
+      currentWeightKg: 85.5,
+      targetWeightKg: 78.0,
+      primaryGoal: 'hypertrophy',
+      baselineMeasurements: {
+        chestCm: 104,
+        waistCm: 86,
+        hipsCm: 98,
+        bicepsCm: 38
+      },
+      startingPhotos: {
+        front: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80'
+      },
+      injuryHistory: 'Mild left shoulder impingement during overhead barbell press. Retains full dumbbell mobility.',
+      medicalNotes: 'Cleared for high-intensity progressive resistance training.',
+      hasMedicalClearance: true,
+      trainingDaysPerWeek: 5,
+      trainingLocation: 'commercial_gym',
+      availableEquipment: ['Barbells', 'Dumbbells', 'Cable Stations', 'Squat Rack', 'Leg Press'],
+      workoutDurationMinutes: 65,
+      dietaryPreference: 'flexible_dieting',
+      foodAllergies: 'None',
+      excludedFoods: 'Raw shellfish',
+      mealsPerDay: 4,
+      supplementHistory: 'Whey isolate (30g/day), Creatine Monohydrate (5g/day)'
+    });
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 pb-24">
       {/* Coach Header Bar */}
@@ -302,7 +538,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-black text-neutral-900 uppercase font-display tracking-tight">
-                  {currentUser?.displayName || user?.displayName || 'Coach Marcus Vance'}
+                  {currentUser?.displayName || user?.displayName || 'Lead Coach'}
                 </h1>
                 <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-wider ${
                   userRole === 'admin'
@@ -420,7 +656,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
             { id: 'clients', label: 'Client Management Table', icon: Users },
             { id: 'progress', label: 'Client Progress & Graphs', icon: TrendingUp },
             { id: 'builder', label: 'Program & Macro Builder', icon: Dumbbell },
-            { id: 'checkins', label: 'Check-In Review Queue', icon: CheckSquare, badge: '1 Review' },
+            { id: 'checkins', label: 'Check-In Review Queue', icon: CheckSquare, badge: pendingCheckInsCount > 0 ? `${pendingCheckInsCount} Review${pendingCheckInsCount > 1 ? 's' : ''}` : undefined },
             { id: 'intakes', label: 'Intake Submissions', icon: FileText, badge: `${intakeSubmissions.length}` },
             ...(adminDashboardMode === 'admin'
               ? [{ id: 'team', label: 'Coaches & Staff', icon: ShieldCheck, badge: `${coaches.length}` }]
@@ -598,18 +834,45 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                             </td>
 
                             <td className="py-4 px-6">
-                              <div className="font-semibold text-neutral-900">{c.planName}</div>
+                              <div className="font-semibold text-neutral-900">{c.activePlanName || c.planName}</div>
                               <span className="text-[11px] text-neutral-500">{c.primaryGoal}</span>
+                              {c.renewalRequestedPlanName && (
+                                <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold">
+                                  <Clock className="w-2.5 h-2.5 text-amber-600" />
+                                  <span>Renew: {c.renewalRequestedPlanName} (${c.renewalRequestedPlanPrice})</span>
+                                </div>
+                              )}
+                              {c.planExpiresAt && !c.renewalRequestedPlanName && (
+                                <div className="text-[10px] font-mono mt-0.5">
+                                  {isPlanExpired(c) || c.status === 'expired' ? (
+                                    <span className="text-red-600 font-bold">Expired on {new Date(c.planExpiresAt).toLocaleDateString()}</span>
+                                  ) : (
+                                    <span className="text-neutral-500">Expires {new Date(c.planExpiresAt).toLocaleDateString()} ({getDaysRemaining(c.planExpiresAt)}d left)</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
 
                             <td className="py-4 px-6">
-                              <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                c.status === 'active'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
-                              }`}>
-                                {c.status}
-                              </span>
+                              {c.subscriptionStatus === 'pending_approval' || (c as any).renewalRequestedPlanId || c.status === 'pending' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs">
+                                  <Clock className="w-3 h-3 text-amber-600" />
+                                  <span>{c.renewalRequestedPlanName ? 'Renewal Pending' : 'Awaiting Plan'}</span>
+                                </span>
+                              ) : isPlanExpired(c) || c.status === 'expired' || c.subscriptionStatus === 'expired' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-50 text-red-700 border border-red-200 shadow-2xs">
+                                  <AlertTriangle className="w-3 h-3 text-red-600" />
+                                  <span>Expired</span>
+                                </span>
+                              ) : c.status === 'active' ? (
+                                <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  Active
+                                </span>
+                              ) : (
+                                <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-neutral-100 text-neutral-700 border border-neutral-200">
+                                  {c.status || 'Pending'}
+                                </span>
+                              )}
                             </td>
 
                             <td className="py-4 px-6">
@@ -669,16 +932,76 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                             </td>
 
                             <td className="py-4 px-6 text-right">
-                              <button
-                                onClick={() => setSelectedClientId(c.id)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                                  isSelected
-                                    ? 'bg-red-600 text-white shadow-xs'
-                                    : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-100'
-                                }`}
-                              >
-                                {isSelected ? 'Selected' : 'Inspect'}
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                {(c.subscriptionStatus === 'pending_approval' || (c as any).renewalRequestedPlanId || c.status === 'pending') ? (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (approveAndInitializeClientPlan) {
+                                        await approveAndInitializeClientPlan(c.id);
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold uppercase bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer shadow-xs flex items-center gap-1"
+                                    title="Approve re-enrollment and initialize routine for this package"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                    <span>Approve & Initialize</span>
+                                  </button>
+                                ) : (isPlanExpired(c) || c.status === 'expired' || c.subscriptionStatus === 'expired') ? (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (approveAndInitializeClientPlan) {
+                                        await approveAndInitializeClientPlan(c.id);
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold uppercase bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer shadow-xs flex items-center gap-1"
+                                    title="Re-activate package and initialize routine"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                    <span>Re-Activate & Initialize</span>
+                                  </button>
+                                ) : c.status !== 'active' ? (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (approveAndInitializeClientPlan) {
+                                        await approveAndInitializeClientPlan(c.id);
+                                      } else if (updateIntakeStatus) {
+                                        await updateIntakeStatus('', c.id, 'active');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold uppercase bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer shadow-xs flex items-center gap-1"
+                                    title="Approve client enrollment and activate plan"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                                    <span>Approve & Initialize</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (setClientPlanExpired) {
+                                        await setClientPlanExpired(c.id);
+                                      }
+                                    }}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-bold text-neutral-500 hover:text-red-600 hover:bg-red-50 border border-neutral-200 hover:border-red-200 transition-colors cursor-pointer"
+                                    title="Simulate package timeline expiration for testing"
+                                  >
+                                    Simulate Expire
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setSelectedClientId(c.id)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-red-600 text-white shadow-xs'
+                                      : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-100'
+                                  }`}
+                                >
+                                  {isSelected ? 'Selected' : 'Inspect'}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -691,7 +1014,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
 
             {/* Bottom: Detailed Selected Client Profile & Biofeedback Snapshot */}
             <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
-              {selectedClient ? (
+              {visibleClients.length > 0 && selectedClient?.id ? (
                 <>
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-neutral-200">
                     <div className="flex items-center gap-4">
@@ -701,13 +1024,26 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                         className="w-16 h-16 rounded-2xl object-cover border-2 border-red-600/50"
                       />
                       <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">
-                          Client Profile &bull; Joined {selectedClient.joinedDate}
-                        </span>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">
+                            Client Profile &bull; Joined {selectedClient.joinedDate}
+                          </span>
+                          {clientIntake ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Intake Form Linked ({clientIntake.submittedAt ? clientIntake.submittedAt.split('T')[0] : 'Completed'})
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              Pending Onboarding Intake
+                            </span>
+                          )}
+                        </div>
                         <h2 className="text-2xl font-black text-neutral-900 uppercase font-display">
                           {selectedClient.name}
                         </h2>
-                        <p className="text-xs text-neutral-500">{selectedClient.email} &bull; Goal: <strong className="text-neutral-900">{selectedClient.primaryGoal}</strong></p>
+                        <p className="text-xs text-neutral-500">{selectedClient.email} &bull; Goal: <strong className="text-neutral-900">{formatGoal(clientIntake?.primaryGoal || selectedClient.primaryGoal)}</strong></p>
                       </div>
                     </div>
 
@@ -731,23 +1067,111 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                     </div>
                   </div>
 
+                  {/* Subscription Timeline & Renewal Review Banner */}
+                  <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    selectedClient.subscriptionStatus === 'pending_approval' || (selectedClient as any).renewalRequestedPlanId
+                      ? 'bg-amber-50/80 border-amber-300'
+                      : isPlanExpired(selectedClient) || selectedClient.status === 'expired' || selectedClient.subscriptionStatus === 'expired'
+                      ? 'bg-red-50/80 border-red-300'
+                      : 'bg-neutral-50 border-neutral-200'
+                  }`}>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+                          Package Subscription:
+                        </span>
+                        <strong className="text-xs font-extrabold text-red-600 uppercase">
+                          {selectedClient.activePlanName || selectedClient.planName}
+                        </strong>
+                        {(selectedClient.subscriptionStatus === 'pending_approval' || (selectedClient as any).renewalRequestedPlanId) ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
+                            Renewal Pending Review
+                          </span>
+                        ) : isPlanExpired(selectedClient) || selectedClient.status === 'expired' || selectedClient.subscriptionStatus === 'expired' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-100 text-red-800 border border-red-300">
+                            Expired
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Active
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-xs text-neutral-600 flex flex-wrap items-center gap-3">
+                        {selectedClient.renewalRequestedPlanName && (
+                          <span className="font-bold text-amber-800">
+                            Requested Renewal: {selectedClient.renewalRequestedPlanName} (${selectedClient.renewalRequestedPlanPrice})
+                          </span>
+                        )}
+                        {selectedClient.packageStartedAt && (
+                          <span>Started: <strong className="text-neutral-800">{new Date(selectedClient.packageStartedAt).toLocaleDateString()}</strong></span>
+                        )}
+                        {selectedClient.planExpiresAt && (
+                          <span>
+                            Expires: <strong className={isPlanExpired(selectedClient) ? 'text-red-600 font-bold' : 'text-neutral-800'}>
+                              {new Date(selectedClient.planExpiresAt).toLocaleDateString()}
+                            </strong>
+                            {' '}({getDaysRemaining(selectedClient.planExpiresAt)}d remaining)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {(selectedClient.subscriptionStatus === 'pending_approval' || (selectedClient as any).renewalRequestedPlanId || isPlanExpired(selectedClient) || selectedClient.status === 'expired') && (
+                        <button
+                          onClick={async () => {
+                            if (approveAndInitializeClientPlan) {
+                              await approveAndInitializeClientPlan(selectedClient.id);
+                            }
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
+                        >
+                          <Sparkles className="w-4 h-4 text-white" />
+                          <span>Approve & Initialize Plan</span>
+                        </button>
+                      )}
+                      {selectedClient.status === 'active' && !isPlanExpired(selectedClient) && (
+                        <button
+                          onClick={async () => {
+                            if (setClientPlanExpired) {
+                              await setClientPlanExpired(selectedClient.id);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl border border-neutral-300 hover:border-red-300 hover:bg-red-50 text-neutral-600 hover:text-red-600 text-xs font-bold transition-colors cursor-pointer"
+                          title="Simulate package expiration to test client portal lockdown"
+                        >
+                          Simulate Expire
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Body Composition Tracking */}
                   <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-600 mb-3">
-                      Weight & Metric Trajectory
-                    </h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-600">
+                        Weight & Metric Trajectory
+                      </h3>
+                      {clientIntake && (
+                        <span className="text-[10px] text-emerald-600 font-bold">
+                          ✓ Sourced from athlete intake submission
+                        </span>
+                      )}
+                    </div>
                     <div className="grid grid-cols-3 gap-3">
                       <div className="bg-neutral-50 p-3.5 rounded-2xl border border-neutral-200 text-center">
                         <span className="text-[10px] text-neutral-500 font-semibold uppercase block">Baseline Starting</span>
-                        <span className="text-lg font-black text-neutral-900 font-mono">{selectedClient.startingWeightKg} kg</span>
+                        <span className="text-lg font-black text-neutral-900 font-mono">{baselineStartingWeight} kg</span>
                       </div>
                       <div className="bg-neutral-50 p-3.5 rounded-2xl border border-neutral-200 text-center">
                         <span className="text-[10px] text-neutral-500 font-semibold uppercase block">Current Weight</span>
-                        <span className="text-lg font-black text-red-600 font-mono">{selectedClient.currentWeightKg} kg</span>
+                        <span className="text-lg font-black text-red-600 font-mono">{currentWeightDisplay} kg</span>
                       </div>
                       <div className="bg-neutral-50 p-3.5 rounded-2xl border border-neutral-200 text-center">
                         <span className="text-[10px] text-neutral-500 font-semibold uppercase block">Target Goal</span>
-                        <span className="text-lg font-black text-emerald-600 font-mono">{selectedClient.targetWeightKg} kg</span>
+                        <span className="text-lg font-black text-emerald-600 font-mono">{targetGoalWeightDisplay} kg</span>
                       </div>
                     </div>
                   </div>
@@ -760,7 +1184,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                         <span>Injury Constraints</span>
                       </div>
                       <p className="text-xs text-neutral-700 leading-relaxed">
-                        {selectedClient.injuryNotes || 'None reported. Cleared for all compound loads.'}
+                        {injuryNotesDisplay}
                       </p>
                     </div>
 
@@ -770,7 +1194,11 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                         <span>Logistics & Availability</span>
                       </div>
                       <p className="text-xs text-neutral-700 leading-relaxed">
-                        {selectedClient.daysPerWeek} days/week &bull; Equipment: {selectedClient.availableEquipment?.join(', ') || 'Commercial gym access'}
+                        {availabilityDaysDisplay
+                          ? `${availabilityDaysDisplay} days/week${equipmentDisplay.length > 0 ? ` • Equipment: ${equipmentDisplay.join(', ')}` : ''}`
+                          : (equipmentDisplay.length > 0
+                              ? `Equipment: ${equipmentDisplay.join(', ')}`
+                              : 'Pending client onboarding intake submission')}
                       </p>
                     </div>
                   </div>
@@ -800,7 +1228,11 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                 </>
               ) : (
                 <div className="text-center py-12 text-neutral-500">
-                  Select a client from the roster to inspect profile and program data.
+                  <Users className="w-10 h-10 text-neutral-300 mx-auto mb-2" />
+                  <h3 className="text-sm font-bold text-neutral-800 uppercase font-display">No Athlete Selected</h3>
+                  <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
+                    When athletes register or are assigned to you, select a client from the roster above to inspect their profile and training program.
+                  </p>
                 </div>
               )}
             </div>
@@ -809,7 +1241,47 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
 
         {/* 2. PROGRAM & MACRO BUILDER */}
         {activeTab === 'builder' && (
-          <div className="space-y-8">
+          <div className="space-y-6">
+            {/* Active Athlete Programming Target Selector */}
+            <div className="bg-white border border-neutral-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+              <div>
+                <span className="text-xs font-bold text-neutral-800 uppercase tracking-wider block">
+                  Active Athlete Programming Target:
+                </span>
+                <span className="text-xs text-neutral-500">
+                  Target client for exercise protocol push and prescribed macronutrient targets.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-neutral-600 font-medium">Programming For:</label>
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => setSelectedClientId(e.target.value)}
+                  disabled={visibleClients.length === 0}
+                  className="bg-neutral-50 border border-neutral-300 rounded-xl px-3 py-1.5 text-xs text-neutral-900 focus:border-red-600 focus:outline-none font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {visibleClients.length === 0 ? (
+                    <option value="" disabled>No athletes registered yet</option>
+                  ) : (
+                    visibleClients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.planName || 'Elite Athlete'})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {visibleClients.length === 0 && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                <div className="text-xs text-amber-800">
+                  <span className="font-bold">No active athletes found in roster.</span> All client records were cleared from Firestore. Once an athlete registers or completes onboarding intake, select them here to compile custom workout sessions and metabolic targets.
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               {/* Left Column: Routine & Exercise Sequence Builder */}
               <div className="lg:col-span-8 bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
@@ -820,13 +1292,14 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       Custom Workout Session Builder
                     </h2>
                     <p className="text-xs text-neutral-500 mt-0.5">
-                      Assigning to client: <strong className="text-neutral-900">{selectedClient.name}</strong>
+                      Assigning to client: <strong className="text-neutral-900">{visibleClients.length > 0 && selectedClient.id ? selectedClient.name : 'No athlete selected'}</strong>
                     </p>
                   </div>
 
                   <button
                     onClick={handlePublishWorkout}
-                    className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-red-500/20 cursor-pointer"
+                    disabled={!selectedClient?.id || visibleClients.length === 0}
+                    className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-red-500/20 cursor-pointer transition-all"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>Publish & Push to Client</span>
@@ -850,6 +1323,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       type="text"
                       value={builderWorkoutTitle}
                       onChange={(e) => setBuilderWorkoutTitle(e.target.value)}
+                      placeholder="e.g. Day 1: Push Hypertrophy & Chest/Delt Specialization"
                       className="w-full px-4 py-2 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 text-sm focus:border-red-600 focus:bg-white focus:outline-none"
                     />
                   </div>
@@ -861,6 +1335,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       type="text"
                       value={builderWorkoutDesc}
                       onChange={(e) => setBuilderWorkoutDesc(e.target.value)}
+                      placeholder="e.g. Progressive overload focus, 3-sec eccentrics, clavicular recruitment"
                       className="w-full px-4 py-2 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 text-sm focus:border-red-600 focus:bg-white focus:outline-none"
                     />
                   </div>
@@ -882,7 +1357,24 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                     </button>
                   </div>
 
-                  {builderExercises.map((ex, exIdx) => (
+                  {builderExercises.length === 0 ? (
+                    <div className="p-8 text-center bg-neutral-50 rounded-2xl border border-dashed border-neutral-300">
+                      <Dumbbell className="w-8 h-8 text-neutral-400 mx-auto mb-2" />
+                      <h4 className="text-xs font-bold text-neutral-700 uppercase tracking-wider">No Exercises Programmed Yet</h4>
+                      <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
+                        Click "+ Add Lift" to begin configuring exercises, set volumes, and biomechanical cues for this session.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleAddExerciseToBuilder}
+                        className="mt-3 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add First Lift</span>
+                      </button>
+                    </div>
+                  ) : (
+                    builderExercises.map((ex, exIdx) => (
                     <div key={ex.id} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -989,7 +1481,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )))}
                 </div>
               </div>
 
@@ -1001,9 +1493,20 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                     Macronutrient Targets
                   </h3>
                   <p className="text-xs text-neutral-500 mt-0.5">
-                    Configured for {selectedClient.name}
+                    Configured for {visibleClients.length > 0 && selectedClient.id ? selectedClient.name : 'No athlete selected'}
                   </p>
                 </div>
+
+                {visibleClients.length > 0 && selectedClient.id && (
+                  <button
+                    type="button"
+                    onClick={handleAutoCalculateMacros}
+                    className="w-full py-2 px-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-red-600" />
+                    <span>Auto-Calculate From Intake & Weight</span>
+                  </button>
+                )}
 
                 {nutritionSaved && (
                   <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-bold flex items-center gap-2">
@@ -1020,7 +1523,8 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                     <input
                       type="number"
                       value={nutriCalories}
-                      onChange={(e) => setNutriCalories(Number(e.target.value))}
+                      onChange={(e) => setNutriCalories(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="e.g. 2400"
                       className="w-full px-4 py-2 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 font-mono text-base focus:border-red-600 focus:bg-white focus:outline-none"
                     />
                   </div>
@@ -1031,7 +1535,8 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       <input
                         type="number"
                         value={nutriProtein}
-                        onChange={(e) => setNutriProtein(Number(e.target.value))}
+                        onChange={(e) => setNutriProtein(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="e.g. 180"
                         className="w-full px-3 py-1.5 rounded-lg bg-neutral-50 border border-neutral-300 text-neutral-900 font-mono text-xs focus:bg-white"
                       />
                     </div>
@@ -1040,7 +1545,8 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       <input
                         type="number"
                         value={nutriCarbs}
-                        onChange={(e) => setNutriCarbs(Number(e.target.value))}
+                        onChange={(e) => setNutriCarbs(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="e.g. 220"
                         className="w-full px-3 py-1.5 rounded-lg bg-neutral-50 border border-neutral-300 text-neutral-900 font-mono text-xs focus:bg-white"
                       />
                     </div>
@@ -1049,7 +1555,8 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       <input
                         type="number"
                         value={nutriFat}
-                        onChange={(e) => setNutriFat(Number(e.target.value))}
+                        onChange={(e) => setNutriFat(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="e.g. 60"
                         className="w-full px-3 py-1.5 rounded-lg bg-neutral-50 border border-neutral-300 text-neutral-900 font-mono text-xs focus:bg-white"
                       />
                     </div>
@@ -1063,7 +1570,8 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       type="number"
                       step="0.5"
                       value={nutriWater}
-                      onChange={(e) => setNutriWater(Number(e.target.value))}
+                      onChange={(e) => setNutriWater(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="e.g. 3.5"
                       className="w-full px-4 py-2 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 font-mono text-xs focus:border-red-600 focus:bg-white focus:outline-none"
                     />
                   </div>
@@ -1076,13 +1584,15 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                       rows={3}
                       value={nutriNotes}
                       onChange={(e) => setNutriNotes(e.target.value)}
+                      placeholder="Prescribe daily nutritional directives, meal timing, hydration protocols..."
                       className="w-full px-3 py-2 rounded-xl bg-neutral-50 border border-neutral-300 text-neutral-900 text-xs focus:border-red-600 focus:bg-white focus:outline-none resize-none"
                     />
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
+                    disabled={!selectedClient?.id || visibleClients.length === 0}
+                    className="w-full py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Save Macros</span>
@@ -1098,43 +1608,75 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* List of check-ins */}
             <div className="lg:col-span-5 space-y-3">
-              <h2 className="text-xl font-black text-neutral-900 uppercase font-display mb-4">
-                Incoming Weekly Submissions
-              </h2>
-
-              {checkIns.map((ci) => {
-                const isSelected = activeCheckInId === ci.id;
-                const isPending = !ci.coachFeedback;
-                return (
-                  <div
-                    key={ci.id}
-                    onClick={() => setActiveCheckInId(ci.id)}
-                    className={`p-5 rounded-2xl border cursor-pointer transition-all ${
-                      isSelected
-                        ? 'bg-white border-red-600 shadow-md ring-1 ring-red-600/20'
-                        : 'bg-white border-neutral-200 hover:border-neutral-300 shadow-sm'
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-black text-neutral-900 uppercase font-display">
+                  Weekly Biofeedback ({visibleCheckIns.length})
+                </h2>
+                <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl border border-neutral-200 text-[10px] font-bold">
+                  <button
+                    onClick={() => setCheckInFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg cursor-pointer transition-colors ${
+                      checkInFilter === 'all' ? 'bg-white text-neutral-900 shadow-xs' : 'text-neutral-500 hover:text-neutral-900'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-neutral-900">{ci.clientName}</span>
-                        <span className="text-xs text-neutral-500">&bull; Week #{ci.weekNumber}</span>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        isPending ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      }`}>
-                        {isPending ? 'Needs Audit' : 'Audited'}
-                      </span>
-                    </div>
+                    All Athletes
+                  </button>
+                  <button
+                    onClick={() => setCheckInFilter('selected')}
+                    className={`px-2.5 py-1 rounded-lg cursor-pointer transition-colors ${
+                      checkInFilter === 'selected' ? 'bg-white text-neutral-900 shadow-xs' : 'text-neutral-500 hover:text-neutral-900'
+                    }`}
+                  >
+                    {selectedClient.name.split(' ')[0]}
+                  </button>
+                </div>
+              </div>
 
-                    <div className="flex items-center gap-4 text-xs text-neutral-500 font-mono">
-                      <span>Weight: <strong className="text-neutral-900">{ci.weightKg} kg</strong></span>
-                      <span>Adherence: <strong className="text-red-600">{ci.adherenceRating}/10</strong></span>
-                      <span>Sleep: {ci.sleepHours}h</span>
+              {visibleCheckIns.length > 0 ? (
+                visibleCheckIns.map((ci) => {
+                  const isSelected = activeCheckInId === ci.id;
+                  const isPending = !ci.coachFeedback;
+                  return (
+                    <div
+                      key={ci.id}
+                      onClick={() => setActiveCheckInId(ci.id)}
+                      className={`p-5 rounded-2xl border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-white border-red-600 shadow-md ring-1 ring-red-600/20'
+                          : 'bg-white border-neutral-200 hover:border-neutral-300 shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-neutral-900">{ci.clientName}</span>
+                          <span className="text-xs text-neutral-500">&bull; Week #{ci.weekNumber}</span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          isPending ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        }`}>
+                          {isPending ? 'Needs Audit' : 'Audited'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-xs text-neutral-500 font-mono">
+                        <span>Weight: <strong className="text-neutral-900">{ci.weightKg} kg</strong></span>
+                        <span>Adherence: <strong className="text-red-600">{ci.adherenceRating}/10</strong></span>
+                        <span>Sleep: {ci.sleepHours}h</span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <div className="p-8 text-center bg-white border border-neutral-200 rounded-2xl">
+                  <CheckSquare className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+                  <h4 className="text-sm font-bold text-neutral-800 uppercase font-display">No Check-Ins Found</h4>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    {checkInFilter === 'selected'
+                      ? `No weekly check-in forms submitted yet by ${selectedClient.name}.`
+                      : 'When athletes submit their weekly biofeedback, submissions will populate here for review.'}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Audit & Coach Response Form */}
@@ -1232,82 +1774,179 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
         {/* 4. INTAKE SUBMISSIONS QUEUE */}
         {activeTab === 'intakes' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-black text-neutral-900 uppercase font-display">
                   Client Intake Form Pipeline
                 </h2>
                 <p className="text-xs text-neutral-500">
-                  Data submitted through the public onboarding flow routed for initial split programming.
+                  Data submitted through client onboarding routed for initial split programming and baseline biometrics review.
                 </p>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={handleSeedDemoIntake}
+                  className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-red-500" />
+                  <span>Seed Demo Intake</span>
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6">
-              {intakeSubmissions.map((intake) => (
-                <div key={intake.id} className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-200">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-700 flex items-center justify-center font-bold text-lg">
-                        {intake.clientName.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-black text-neutral-900 uppercase font-display">{intake.clientName}</h3>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                            {intake.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-neutral-500">{intake.clientEmail} &bull; Submitted {intake.submittedAt}</p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setActiveTab('builder');
-                      }}
-                      className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-md shadow-red-500/20"
-                    >
-                      <Dumbbell className="w-4 h-4" />
-                      <span>Initialize Program</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
-                      <span className="text-[10px] text-neutral-500 block uppercase font-bold">Goal</span>
-                      <span className="text-xs font-bold text-neutral-900 uppercase">{intake.primaryGoal}</span>
-                    </div>
-                    <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
-                      <span className="text-[10px] text-neutral-500 block uppercase font-bold">Age / Height</span>
-                      <span className="text-xs font-bold text-neutral-900 font-mono">{intake.age} yrs &bull; {intake.heightCm} cm</span>
-                    </div>
-                    <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
-                      <span className="text-[10px] text-neutral-500 block uppercase font-bold">Weight (Cur &rarr; Target)</span>
-                      <span className="text-xs font-bold text-red-600 font-mono">{intake.currentWeightKg}kg &rarr; {intake.targetWeightKg}kg</span>
-                    </div>
-                    <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
-                      <span className="text-[10px] text-neutral-500 block uppercase font-bold">Availability</span>
-                      <span className="text-xs font-bold text-neutral-900 font-mono">{intake.trainingDaysPerWeek} Days / {intake.workoutDurationMinutes} min</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                    <div className="p-4 rounded-xl bg-neutral-50 border border-neutral-200">
-                      <span className="font-bold text-red-600 uppercase block mb-1">Injury History & Medical Clearance</span>
-                      <p className="text-neutral-700">{intake.injuryHistory || 'None noted.'}</p>
-                      <p className="text-[11px] text-neutral-500 mt-1">{intake.medicalNotes}</p>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-neutral-50 border border-neutral-200">
-                      <span className="font-bold text-red-600 uppercase block mb-1">Nutrition & Exclusions</span>
-                      <p className="text-neutral-700">Pref: {intake.dietaryPreference} &bull; Excluded: {intake.excludedFoods || 'None'}</p>
-                      <p className="text-[11px] text-neutral-500 mt-1">Supplements: {intake.supplementHistory || 'None'}</p>
-                    </div>
-                  </div>
+            {intakeSubmissions.length === 0 ? (
+              <div className="bg-white border border-neutral-200 rounded-3xl p-12 text-center space-y-4 shadow-sm">
+                <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+                  <FileText className="w-8 h-8" />
                 </div>
-              ))}
-            </div>
+                <div className="max-w-md mx-auto">
+                  <h3 className="text-lg font-bold text-neutral-900">No Pending Client Intake Submissions</h3>
+                  <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+                    When new clients complete onboarding, their complete health history, baseline body metrics, and training availability will appear here in this queue.
+                  </p>
+                </div>
+                <div className="flex justify-center gap-3 pt-2">
+                  <button
+                    onClick={handleSeedDemoIntake}
+                    className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-md shadow-red-500/20"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Seed Demo Athlete Intake</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('clients')}
+                    className="px-5 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-bold text-xs uppercase tracking-wider border border-neutral-300 cursor-pointer"
+                  >
+                    Inspect Client Roster
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-6">
+                {intakeSubmissions.map((intake) => (
+                  <div key={intake.id} className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-200">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-700 flex items-center justify-center font-bold text-lg">
+                          {intake.clientName.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-xl font-black text-neutral-900 uppercase font-display">{intake.clientName}</h3>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                              {intake.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-neutral-500 flex flex-wrap items-center gap-2 mt-0.5">
+                            <span>{intake.clientEmail} &bull; Submitted {formatIntakeDate(intake.submittedAt)}</span>
+                            {intake.selectedPlanName && (
+                              <span className="font-bold text-neutral-900 bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200 text-[11px]">
+                                Plan: {intake.selectedPlanName} (${intake.selectedPlanPrice})
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="text-left sm:text-right">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block mb-1">
+                            Lead Coach
+                          </label>
+                          <select
+                            value={(intake as any).coachId || (intake as any).assignedCoachId || 'admin_mass_narimanian'}
+                            onChange={(e) => {
+                              if (assignCoachToClient && intake.clientId) {
+                                assignCoachToClient(intake.clientId, e.target.value);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-neutral-50 border border-neutral-300 text-neutral-900 text-xs font-semibold focus:border-red-600 focus:outline-none shadow-xs cursor-pointer"
+                          >
+                            {coaches.map((coach) => (
+                              <option key={coach.id} value={coach.id}>
+                                {coach.name} ({coach.role === 'admin' ? 'Founder' : coach.role === 'nutritionist' ? 'Nutritionist' : 'Coach'})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {intake.status !== 'active' && (
+                          <button
+                            onClick={async () => {
+                              if (updateIntakeStatus) {
+                                await updateIntakeStatus(intake.id, intake.clientId, 'active');
+                              }
+                            }}
+                            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-200 transition-all"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Approve & Activate</span>
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => handleInitializeProgram(intake)}
+                          disabled={initializingIntakeId === intake.id}
+                          className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-md shadow-red-500/20 transition-all"
+                        >
+                          {initializingIntakeId === intake.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Dumbbell className="w-4 h-4" />
+                          )}
+                          <span>{initializingIntakeId === intake.id ? 'Initializing...' : 'Initialize Program'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
+                        <span className="text-[10px] text-neutral-500 block uppercase font-bold">Goal</span>
+                        <span className="text-xs font-bold text-neutral-900 uppercase">{formatGoal(intake.primaryGoal)}</span>
+                      </div>
+                      <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
+                        <span className="text-[10px] text-neutral-500 block uppercase font-bold">Age / Height</span>
+                        <span className="text-xs font-bold text-neutral-900 font-mono">{intake.age} yrs &bull; {intake.heightCm} cm</span>
+                      </div>
+                      <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
+                        <span className="text-[10px] text-neutral-500 block uppercase font-bold">Weight (Cur &rarr; Target)</span>
+                        <span className="text-xs font-bold text-red-600 font-mono">{intake.currentWeightKg}kg &rarr; {intake.targetWeightKg}kg</span>
+                      </div>
+                      <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200">
+                        <span className="text-[10px] text-neutral-500 block uppercase font-bold">Availability</span>
+                        <span className="text-xs font-bold text-neutral-900 font-mono">{intake.trainingDaysPerWeek} Days / {intake.workoutDurationMinutes || 60} min</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      <div className="p-4 rounded-xl bg-neutral-50 border border-neutral-200">
+                        <span className="font-bold text-red-600 uppercase block mb-1">Injury History & Medical Clearance</span>
+                        <p className="text-neutral-700">{intake.injuryHistory || 'None noted.'}</p>
+                        <p className="text-[11px] text-neutral-500 mt-1">{intake.medicalNotes}</p>
+                        {intake.baselineMeasurements && (
+                          <div className="mt-2 pt-2 border-t border-neutral-200 text-[11px] text-neutral-600 flex gap-3">
+                            <span>Waist: <strong className="text-neutral-900">{intake.baselineMeasurements.waistCm || '—'}cm</strong></span>
+                            <span>Chest: <strong className="text-neutral-900">{intake.baselineMeasurements.chestCm || '—'}cm</strong></span>
+                            <span>Biceps: <strong className="text-neutral-900">{intake.baselineMeasurements.bicepsCm || '—'}cm</strong></span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-neutral-50 border border-neutral-200">
+                        <span className="font-bold text-red-600 uppercase block mb-1">Nutrition & Exclusions</span>
+                        <p className="text-neutral-700">Pref: {intake.dietaryPreference ? intake.dietaryPreference.replace(/_/g, ' ') : 'Flexible'} &bull; Excluded: {intake.excludedFoods || 'None'}</p>
+                        <p className="text-[11px] text-neutral-500 mt-1">Supplements: {intake.supplementHistory || 'None'}</p>
+                        {intake.availableEquipment && intake.availableEquipment.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-neutral-200 text-[11px] text-neutral-600">
+                            <span>Equipment: <strong className="text-neutral-900">{intake.availableEquipment.join(', ')}</strong></span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1323,7 +1962,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                 />
                 <div>
                   <h3 className="text-sm font-bold text-neutral-900 uppercase font-display">{selectedClient.name}</h3>
-                  <p className="text-[11px] text-neutral-500">{selectedClient.planName}</p>
+                  <p className="text-[11px] text-neutral-500">{selectedClient.activePlanName || selectedClient.planName}</p>
                 </div>
               </div>
               <span className="px-3 py-1 rounded-full bg-red-50 border border-red-200 text-red-600 text-[10px] font-bold uppercase">
@@ -1332,29 +1971,43 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
             </div>
 
             <div className="flex-1 p-6 overflow-y-auto space-y-4">
-              {messages.map((msg) => {
-                const isMe = msg.senderRole === 'coach';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-bold text-neutral-500">{msg.senderName}</span>
-                      <span className="text-[10px] text-neutral-400">{msg.timestamp}</span>
-                    </div>
+              {coachClientMessages.length > 0 ? (
+                coachClientMessages.map((msg) => {
+                  const isMe = msg.senderRole === 'coach' || msg.senderRole === 'admin';
+                  return (
                     <div
-                      className={`max-w-md px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
-                        isMe
-                          ? 'bg-red-600 text-white rounded-br-none shadow-sm'
-                          : 'bg-neutral-100 text-neutral-800 rounded-bl-none border border-neutral-200'
-                      }`}
+                      key={msg.id}
+                      className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                     >
-                      {msg.text}
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-neutral-500">{msg.senderName}</span>
+                        <span className="text-[10px] text-neutral-400">{msg.timestamp}</span>
+                      </div>
+                      <div
+                        className={`max-w-md px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+                          isMe
+                            ? 'bg-red-600 text-white rounded-br-none shadow-sm'
+                            : 'bg-neutral-100 text-neutral-800 rounded-bl-none border border-neutral-200'
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
                     </div>
+                  );
+                })
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 text-neutral-400">
+                  <div className="w-14 h-14 rounded-2xl bg-neutral-100 text-neutral-400 flex items-center justify-center mb-3">
+                    <MessageSquare className="w-7 h-7 text-neutral-400" />
                   </div>
-                );
-              })}
+                  <h4 className="text-sm font-bold text-neutral-800 uppercase font-display">
+                    1-on-1 Chat with {selectedClient.name}
+                  </h4>
+                  <p className="text-xs text-neutral-500 max-w-sm mt-1">
+                    No messages exchanged yet with this athlete. Type a greeting or form cues below to initiate direct communication.
+                  </p>
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleSendCoachMessage} className="p-4 bg-neutral-50 border-t border-neutral-200 flex items-center gap-3">
@@ -1394,18 +2047,23 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                 <select
                   value={selectedClientId}
                   onChange={(e) => setSelectedClientId(e.target.value)}
-                  className="bg-neutral-50 border border-neutral-300 rounded-lg px-3 py-1.5 text-xs text-neutral-900 focus:border-red-600 focus:outline-none font-bold"
+                  disabled={clients.length === 0}
+                  className="bg-neutral-50 border border-neutral-300 rounded-lg px-3 py-1.5 text-xs text-neutral-900 focus:border-red-600 focus:outline-none font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.planName})
-                    </option>
-                  ))}
+                  {clients.length === 0 ? (
+                    <option value="" disabled>No athletes registered yet</option>
+                  ) : (
+                    clients.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.activePlanName || c.planName})
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
             </div>
 
-            <ProgressAnalyticsView clientId={selectedClientId} isCoachView={true} />
+            <ProgressAnalyticsView clientId={selectedClientId} isCoachView={true} checkIns={allCheckIns} />
           </div>
         )}
 

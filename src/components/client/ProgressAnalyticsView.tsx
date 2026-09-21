@@ -17,31 +17,173 @@ import {
 } from 'lucide-react';
 import { useFitnessData } from '../../context/FitnessDataContext';
 import { useAuth } from '../../context/AuthContext';
-import { ProgressMetricPoint, ProgressPhotoRecord } from '../../types';
+import { ProgressMetricPoint, ProgressPhotoRecord, WeeklyCheckIn } from '../../types';
 
 interface ProgressAnalyticsViewProps {
   clientId?: string;
   isCoachView?: boolean;
+  checkIns?: WeeklyCheckIn[];
 }
 
 export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({ 
   clientId, 
-  isCoachView = false 
+  isCoachView = false,
+  checkIns: propCheckIns
 }) => {
   const { user } = useAuth();
-  const { progressMetrics, progressPhotos, logProgressMetric, addProgressPhoto, clients } = useFitnessData();
+  const { 
+    progressMetrics, 
+    progressPhotos, 
+    logProgressMetric, 
+    addProgressPhoto, 
+    clients, 
+    clientIntake, 
+    intakeForms, 
+    intakeSubmissions, 
+    checkIns: ctxCheckIns,
+    submitWeeklyCheckIn
+  } = useFitnessData();
+  const checkIns = propCheckIns || ctxCheckIns;
 
-  const targetClientId = clientId || (user?.role === 'client' ? user.uid : 'client_alex');
-  const clientInfo = clients.find(c => c.id === targetClientId) || clients[0];
+  const targetClientId = clientId || (user?.role === 'client' ? user.uid : (clients[0]?.id || ''));
+  const isRealUser = Boolean(targetClientId && targetClientId !== 'client_alex');
+  const clientInfo = clients.find(c => c.id === targetClientId);
 
-  // Filter metrics and photos for this client
-  const clientMetrics = progressMetrics
-    .filter(m => m.clientId === targetClientId || m.clientId === 'client_alex')
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  // Resolve active onboarding intake submission for this client (for coach inspecting or client self)
+  const allIntakes = intakeForms || intakeSubmissions || [];
+  const effectiveIntake = React.useMemo(() => {
+    if (!targetClientId) return clientIntake || null;
+    const byId = allIntakes.find(i => i.clientId === targetClientId);
+    if (byId) return byId;
+    if (clientInfo?.email) {
+      const byEmail = allIntakes.find(i => i.clientEmail && i.clientEmail.toLowerCase() === clientInfo.email.toLowerCase());
+      if (byEmail) return byEmail;
+    }
+    return clientIntake || null;
+  }, [targetClientId, allIntakes, clientInfo, clientIntake]);
 
-  const clientPhotos = progressPhotos
-    .filter(p => p.clientId === targetClientId || p.clientId === 'client_alex')
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const clientDisplayName = (clientInfo?.name || effectiveIntake?.clientName || (user?.role === 'client' ? user.displayName : undefined)) || 'Valued Athlete';
+
+  // Synthesize dynamic client metrics strictly from:
+  // 1. Onboarding intake baseline (Point 0: Onboarding)
+  // 2. Weekly check-in submissions (Point 1: Week 1, Point 2: Week 2...)
+  // Strictly NO in-between points or synthetic workout weights!
+  const clientMetrics = React.useMemo(() => {
+    const list: (ProgressMetricPoint & { weekLabel?: string; isBaseline?: boolean; weekNumber?: number })[] = [];
+
+    // 1. Add baseline from onboarding intake
+    if (effectiveIntake && Number(effectiveIntake.currentWeightKg) > 0) {
+      const intakeDate = effectiveIntake.submittedAt 
+        ? (typeof effectiveIntake.submittedAt === 'string' ? effectiveIntake.submittedAt.split('T')[0] : 'Baseline') 
+        : 'Baseline';
+      list.push({
+        id: 'metric_intake_baseline',
+        clientId: targetClientId,
+        date: intakeDate,
+        weightKg: Number(effectiveIntake.currentWeightKg),
+        waistCm: effectiveIntake.baselineMeasurements?.waistCm ? Number(effectiveIntake.baselineMeasurements.waistCm) : undefined,
+        chestCm: effectiveIntake.baselineMeasurements?.chestCm ? Number(effectiveIntake.baselineMeasurements.chestCm) : undefined,
+        bicepsCm: effectiveIntake.baselineMeasurements?.bicepsCm ? Number(effectiveIntake.baselineMeasurements.bicepsCm) : undefined,
+        notes: 'Baseline recorded from Onboarding Intake',
+        weekLabel: 'Onboarding',
+        isBaseline: true,
+        weekNumber: 0
+      });
+    }
+
+    // 2. Add points exclusively from weekly check-ins submitted by the client
+    const clientCheckIns = (checkIns || []).filter(c => 
+      c.clientId === targetClientId || 
+      (targetClientId && c.clientId && c.clientId.toLowerCase() === targetClientId.toLowerCase()) ||
+      (clientInfo?.email && (c as any).clientEmail && (c as any).clientEmail.toLowerCase() === clientInfo.email.toLowerCase()) ||
+      (clientInfo?.name && c.clientName && c.clientName.toLowerCase() === clientInfo.name.toLowerCase())
+    );
+
+    // Sort check-ins by week number or date
+    const sortedCheckIns = [...clientCheckIns].sort((a, b) => {
+      if (a.weekNumber && b.weekNumber && a.weekNumber !== b.weekNumber) {
+        return a.weekNumber - b.weekNumber;
+      }
+      return new Date(a.submissionDate || '').getTime() - new Date(b.submissionDate || '').getTime();
+    });
+
+    // Ensure 1 point per weekNumber without duplicate in-between submissions
+    const seenWeeks = new Set<number>();
+    sortedCheckIns.forEach(c => {
+      const weekNum = c.weekNumber || (seenWeeks.size + 1);
+      if (seenWeeks.has(weekNum)) return;
+      seenWeeks.add(weekNum);
+
+      const d = c.submissionDate || new Date().toISOString().split('T')[0];
+      list.push({
+        id: `chk_metric_${c.id || weekNum}`,
+        clientId: targetClientId,
+        date: d,
+        weightKg: Number(c.weightKg),
+        waistCm: c.waistMeasurementCm ? Number(c.waistMeasurementCm) : undefined,
+        volumeLoadKg: (c as any).volumeLoadKg,
+        notes: `Week ${weekNum} Check-In Log${c.winsAndStruggles ? `: ${c.winsAndStruggles}` : ''}`,
+        weekLabel: `Week ${weekNum}`,
+        isBaseline: false,
+        weekNumber: weekNum
+      });
+    });
+
+    // 3. Fallback for demo mock user client_alex only if no intake or checkins exist
+    if (list.length === 0 && targetClientId === 'client_alex') {
+      const logged = (progressMetrics || []).filter(m => m.clientId === 'client_alex');
+      logged.forEach(m => list.push(m));
+    }
+
+    return list;
+  }, [effectiveIntake, targetClientId, checkIns, progressMetrics, clientInfo]);
+
+  // Synthesize dynamic client photos from:
+  // 1. Onboarding intake photos
+  // 2. Weekly check-in photos
+  // 3. Direct progress photo uploads
+  const clientPhotos = React.useMemo(() => {
+    const map = new Map<string, ProgressPhotoRecord>();
+
+    if (effectiveIntake?.startingPhotos?.front) {
+      const pDate = effectiveIntake.submittedAt ? effectiveIntake.submittedAt.split('T')[0] : 'Baseline';
+      map.set('intake_photo', {
+        id: 'photo_intake_baseline',
+        clientId: targetClientId,
+        date: pDate,
+        frontUrl: effectiveIntake.startingPhotos.front,
+        sideUrl: effectiveIntake.startingPhotos.side,
+        backUrl: effectiveIntake.startingPhotos.back,
+        weightKg: Number(effectiveIntake.currentWeightKg) || 0,
+        notes: 'Initial Onboarding Intake Photo'
+      });
+    }
+
+    const clientCheckIns = (checkIns || []).filter(c => c.clientId === targetClientId);
+    clientCheckIns.forEach(c => {
+      if (c.progressPhotos?.front) {
+        map.set(`checkin_photo_${c.id}`, {
+          id: `photo_chk_${c.id}`,
+          clientId: targetClientId,
+          date: c.submissionDate || 'Recent',
+          frontUrl: c.progressPhotos.front,
+          sideUrl: c.progressPhotos.side,
+          backUrl: c.progressPhotos.back,
+          weightKg: Number(c.weightKg),
+          notes: `Week ${c.weekNumber} Physique Photo`
+        });
+      }
+    });
+
+    const directPhotos = (progressPhotos || []).filter(p => p.clientId === targetClientId);
+    directPhotos.forEach(p => {
+      map.set(p.id || p.frontUrl, p);
+    });
+
+    const list = Array.from(map.values());
+    list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return list;
+  }, [effectiveIntake, targetClientId, checkIns, progressPhotos]);
 
   // Active chart metric toggle
   const [activeChartMetric, setActiveChartMetric] = useState<'weight' | 'waist' | 'volume'>('weight');
@@ -68,14 +210,48 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
   const [selectedAfterPhoto, setSelectedAfterPhoto] = useState<ProgressPhotoRecord | undefined>(latestPhoto);
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
 
-  // Latest stats
+  // Synchronize before/after photos when photo list changes
+  React.useEffect(() => {
+    if (clientPhotos.length > 0) {
+      setSelectedBeforePhoto(clientPhotos[0]);
+      setSelectedAfterPhoto(clientPhotos[clientPhotos.length - 1]);
+    } else {
+      setSelectedBeforePhoto(undefined);
+      setSelectedAfterPhoto(undefined);
+    }
+  }, [clientPhotos.length]);
+
+  // Latest stats dynamically pulled from real client data (strictly onboarding baseline + weekly check-ins)
+  const hasCheckIns = clientMetrics.some(m => !m.isBaseline);
+  const baselineMetric = clientMetrics.find(m => m.isBaseline) || clientMetrics[0];
   const latestMetric = clientMetrics[clientMetrics.length - 1];
-  const initialMetric = clientMetrics[0];
-  const startingWeight = clientInfo?.startingWeightKg || initialMetric?.weightKg || 84.5;
-  const currentWeight = latestMetric?.weightKg || clientInfo?.currentWeightKg || 81.2;
-  const targetWeight = clientInfo?.targetWeightKg || 78.0;
-  const weightChange = (currentWeight - startingWeight).toFixed(1);
-  const weightRemaining = Math.max(0, currentWeight - targetWeight).toFixed(1);
+
+  const startingWeight = Number(effectiveIntake?.currentWeightKg || baselineMetric?.weightKg || clientInfo?.startingWeightKg || 0);
+  const currentWeight = Number(latestMetric?.weightKg || startingWeight);
+  const targetWeight = Number(effectiveIntake?.targetWeightKg || clientInfo?.targetWeightKg || 0);
+  const weightChange = startingWeight > 0 ? Number((currentWeight - startingWeight).toFixed(1)) : 0;
+  const weightRemaining = targetWeight > 0 ? Math.abs(currentWeight - targetWeight).toFixed(1) : '0.0';
+
+  // Real waist metrics
+  const metricsWithWaist = clientMetrics.filter(m => typeof m.waistCm === 'number' && (m.waistCm as number) > 0);
+  const latestWaistMetric = metricsWithWaist[metricsWithWaist.length - 1];
+  const initialWaistMetric = metricsWithWaist[0];
+  const baselineWaist = Number(effectiveIntake?.baselineMeasurements?.waistCm || initialWaistMetric?.waistCm || 0);
+  const currentWaist = Number(latestWaistMetric?.waistCm || (baselineWaist > 0 ? baselineWaist : 0));
+  const startingWaist = Number(baselineWaist > 0 ? baselineWaist : (initialWaistMetric?.waistCm || 0));
+  const waistDiff = startingWaist > 0 && currentWaist > 0 && startingWaist !== currentWaist
+    ? Number((currentWaist - startingWaist).toFixed(1))
+    : null;
+
+  // Real session volume metrics
+  const metricsWithVolume = clientMetrics.filter(m => typeof m.volumeLoadKg === 'number' && (m.volumeLoadKg as number) > 0);
+  const latestVolumeMetric = metricsWithVolume[metricsWithVolume.length - 1];
+  const currentVolume = Number(latestVolumeMetric?.volumeLoadKg || 0);
+  const previousVolumeMetric = metricsWithVolume.length > 1 ? metricsWithVolume[metricsWithVolume.length - 2] : null;
+  const previousVolume = Number(previousVolumeMetric?.volumeLoadKg || 0);
+  const volumeOverloadPct = previousVolume > 0 && currentVolume > 0
+    ? Number((((currentVolume - previousVolume) / previousVolume) * 100).toFixed(1))
+    : null;
 
   // Submit new metric
   const handleLogMetric = (e: React.FormEvent) => {
@@ -86,15 +262,32 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
     const ch = newChest ? parseFloat(newChest) : undefined;
     const bi = newBiceps ? parseFloat(newBiceps) : undefined;
 
-    logProgressMetric({
-      clientId: targetClientId,
-      date: new Date().toISOString().split('T')[0],
-      weightKg: w,
-      waistCm: wst,
-      chestCm: ch,
-      bicepsCm: bi,
-      notes: newNotes || 'Direct entry from Progress Dashboard'
-    });
+    // Use submitWeeklyCheckIn to keep progress strictly tied to weekly check-in milestones
+    if (submitWeeklyCheckIn) {
+      submitWeeklyCheckIn({
+        clientId: targetClientId,
+        clientName: clientDisplayName,
+        weekNumber: (checkIns?.length || 0) + 1,
+        weightKg: w,
+        waistMeasurementCm: wst,
+        adherenceRating: 9,
+        energyRating: 8,
+        sleepHours: 8,
+        stressRating: 4,
+        hungerRating: 5,
+        winsAndStruggles: newNotes || 'Direct entry from Progress Dashboard'
+      });
+    } else {
+      logProgressMetric({
+        clientId: targetClientId,
+        date: new Date().toISOString().split('T')[0],
+        weightKg: w,
+        waistCm: wst,
+        chestCm: ch,
+        bicepsCm: bi,
+        notes: newNotes || 'Direct entry from Progress Dashboard'
+      });
+    }
 
     setNewWeight('');
     setNewWaist('');
@@ -125,18 +318,27 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
     setShowPhotoModal(false);
   };
 
-  // Interactive SVG chart calculations
-  const chartPoints = clientMetrics.map((m, idx) => {
-    let val = m.weightKg;
-    if (activeChartMetric === 'waist') val = m.waistCm || 85;
-    if (activeChartMetric === 'volume') val = m.volumeLoadKg || 8000;
-    return {
-      index: idx,
-      date: m.date,
-      value: val,
-      metric: m
-    };
-  });
+  // Interactive SVG chart calculations - dynamic without dummy fallbacks
+  const chartPoints = clientMetrics
+    .map((m, idx) => {
+      let val: number | undefined;
+      if (activeChartMetric === 'weight') {
+        val = m.weightKg;
+      } else if (activeChartMetric === 'waist') {
+        val = m.waistCm;
+      } else if (activeChartMetric === 'volume') {
+        val = m.volumeLoadKg;
+      }
+      return {
+        index: idx,
+        date: m.date,
+        value: val,
+        metric: m
+      };
+    })
+    .filter((p): p is { index: number; date: string; value: number; metric: ProgressMetricPoint } => 
+      p.value !== undefined && p.value !== null && !isNaN(p.value) && p.value > 0
+    );
 
   const values = chartPoints.map(p => p.value);
   const minVal = values.length > 0 ? Math.min(...values) : 0;
@@ -185,7 +387,7 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
               Progress & Physique Analytics
             </h2>
             <span className="px-2 py-0.5 bg-red-50 text-red-600 border border-red-200 text-[10px] font-bold uppercase rounded-md tracking-wider">
-              {clientInfo?.name || 'Client Tracking'}
+              {clientDisplayName}
             </span>
           </div>
           <p className="text-xs text-neutral-500 mt-1">
@@ -222,12 +424,20 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
             <Scale className="w-4 h-4 text-neutral-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-neutral-900">{currentWeight}</span>
-            <span className="text-xs text-neutral-500 font-bold">kg</span>
+            <span className="text-2xl font-black text-neutral-900">{currentWeight > 0 ? currentWeight : '—'}</span>
+            {currentWeight > 0 && <span className="text-xs text-neutral-500 font-bold">kg</span>}
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs font-bold text-emerald-600">
-            <TrendingDown className="w-3.5 h-3.5" />
-            <span>{weightChange} kg from start</span>
+          <div className="mt-2 text-xs">
+            {hasCheckIns && currentWeight > 0 && startingWeight > 0 && currentWeight !== startingWeight ? (
+              <div className={`flex items-center gap-1 font-bold ${weightChange < 0 ? 'text-emerald-600' : 'text-neutral-700'}`}>
+                {weightChange < 0 ? <TrendingDown className="w-3.5 h-3.5 text-emerald-600" /> : <TrendingUp className="w-3.5 h-3.5 text-neutral-600" />}
+                <span>{weightChange < 0 ? `${Math.abs(weightChange)} kg reduction` : `+${weightChange} kg from start`}</span>
+              </div>
+            ) : currentWeight > 0 ? (
+              <span className="text-neutral-500 font-medium">Baseline from Onboarding Intake</span>
+            ) : (
+              <span className="text-neutral-400 font-medium">No weight logged yet</span>
+            )}
           </div>
         </div>
 
@@ -238,11 +448,17 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
             <Sparkles className="w-4 h-4 text-amber-500" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-neutral-900">{targetWeight}</span>
-            <span className="text-xs text-neutral-500 font-bold">kg</span>
+            <span className="text-2xl font-black text-neutral-900">{targetWeight > 0 ? targetWeight : '—'}</span>
+            {targetWeight > 0 && <span className="text-xs text-neutral-500 font-bold">kg</span>}
           </div>
-          <div className="mt-2 text-xs font-semibold text-neutral-500">
-            {weightRemaining} kg remaining to goal
+          <div className="mt-2 text-xs font-medium text-neutral-500">
+            {targetWeight > 0 && currentWeight > 0 ? (
+              <span>{weightRemaining} kg remaining to goal</span>
+            ) : targetWeight > 0 ? (
+              <span>Goal set in intake</span>
+            ) : (
+              <span className="text-neutral-400">Pending goal setup</span>
+            )}
           </div>
         </div>
 
@@ -253,12 +469,20 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
             <Ruler className="w-4 h-4 text-red-600" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-neutral-900">{latestMetric?.waistCm || 83.5}</span>
-            <span className="text-xs text-neutral-500 font-bold">cm</span>
+            <span className="text-2xl font-black text-neutral-900">{currentWaist > 0 ? currentWaist : '—'}</span>
+            {currentWaist > 0 && <span className="text-xs text-neutral-500 font-bold">cm</span>}
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs font-bold text-emerald-600">
-            <TrendingDown className="w-3.5 h-3.5" />
-            <span>-2.5 cm fat loss reduction</span>
+          <div className="mt-2 text-xs">
+            {hasCheckIns && currentWaist > 0 && waistDiff !== null && waistDiff !== 0 ? (
+              <div className={`flex items-center gap-1 font-bold ${waistDiff < 0 ? 'text-emerald-600' : 'text-neutral-700'}`}>
+                {waistDiff < 0 ? <TrendingDown className="w-3.5 h-3.5 text-emerald-600" /> : <TrendingUp className="w-3.5 h-3.5 text-neutral-600" />}
+                <span>{waistDiff < 0 ? `${Math.abs(waistDiff)} cm fat loss reduction` : `+${waistDiff} cm from baseline`}</span>
+              </div>
+            ) : currentWaist > 0 ? (
+              <span className="text-neutral-500 font-medium">Baseline from Onboarding Intake</span>
+            ) : (
+              <span className="text-neutral-400 font-medium">No waist logged yet</span>
+            )}
           </div>
         </div>
 
@@ -270,13 +494,23 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-black text-neutral-900">
-              {latestMetric?.volumeLoadKg ? `${(latestMetric.volumeLoadKg / 1000).toFixed(1)}k` : '10.2k'}
+              {currentVolume > 0
+                ? (currentVolume >= 1000 ? `${(currentVolume / 1000).toFixed(1)}k` : currentVolume)
+                : '—'}
             </span>
-            <span className="text-xs text-neutral-500 font-bold">kg lifted</span>
+            {currentVolume > 0 && <span className="text-xs text-neutral-500 font-bold">kg lifted</span>}
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs font-bold text-emerald-600">
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span>+23.7% progressive overload</span>
+          <div className="mt-2 text-xs">
+            {currentVolume > 0 && volumeOverloadPct !== null ? (
+              <div className={`flex items-center gap-1 font-bold ${volumeOverloadPct >= 0 ? 'text-emerald-600' : 'text-neutral-600'}`}>
+                {volumeOverloadPct >= 0 ? <TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> : <TrendingDown className="w-3.5 h-3.5 text-neutral-600" />}
+                <span>{volumeOverloadPct >= 0 ? `+${volumeOverloadPct}% progressive overload` : `${volumeOverloadPct}% volume change`}</span>
+              </div>
+            ) : currentVolume > 0 ? (
+              <span className="text-neutral-500 font-medium">Latest workout session</span>
+            ) : (
+              <span className="text-neutral-400 font-medium">No session volume logged yet</span>
+            )}
           </div>
         </div>
       </div>
@@ -415,14 +649,16 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
             {chartPoints.map((p, idx) => {
               const cx = getX(idx);
               const cy = getY(p.value);
+              const isBase = (p.metric as any).isBaseline;
+              const weekLabel = (p.metric as any).weekLabel || (isBase ? 'Onboarding' : `Week ${idx}`);
               return (
                 <g key={p.metric.id} className="group cursor-pointer">
                   <circle
                     cx={cx}
                     cy={cy}
-                    r="5"
+                    r={isBase ? "6" : "5"}
                     fill="#ffffff"
-                    stroke="#ef4444"
+                    stroke={isBase ? "#dc2626" : "#ef4444"}
                     strokeWidth="2.5"
                     className="group-hover:r-7 transition-all"
                   />
@@ -437,19 +673,53 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
                   >
                     {p.value} {activeChartMetric === 'weight' ? 'kg' : activeChartMetric === 'waist' ? 'cm' : 'kg'}
                   </text>
-                  {/* Date label at bottom */}
+                  {/* Milestone label at bottom */}
                   <text
                     x={cx}
-                    y={svgHeight - 12}
-                    fill="#737373"
+                    y={svgHeight - 16}
+                    fill="#171717"
                     fontSize="10"
+                    fontWeight="bold"
                     textAnchor="middle"
                   >
-                    {p.date.slice(5)}
+                    {weekLabel}
+                  </text>
+                  <text
+                    x={cx}
+                    y={svgHeight - 4}
+                    fill="#737373"
+                    fontSize="9"
+                    textAnchor="middle"
+                  >
+                    {p.date.length > 5 ? p.date.slice(5) : p.date}
                   </text>
                 </g>
               );
             })}
+            {chartPoints.length === 1 && (
+              <text
+                x={svgWidth / 2}
+                y={margin.top + 20}
+                fill="#dc2626"
+                fontSize="11"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                Baseline recorded from onboarding • Submit Week 1 check-in to chart your next progression milestone
+              </text>
+            )}
+            {chartPoints.length === 0 && (
+              <text
+                x={svgWidth / 2}
+                y={svgHeight / 2}
+                fill="#737373"
+                fontSize="12"
+                fontWeight="bold"
+                textAnchor="middle"
+              >
+                No tracking data logged yet. Complete athlete onboarding or submit a weekly check-in.
+              </text>
+            )}
           </svg>
         </div>
       </div>

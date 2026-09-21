@@ -176,7 +176,9 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ onNa
                   <div className="flex-1 min-w-0 pr-4">
                     <div className="flex items-center justify-between gap-1 mb-0.5">
                       <p className={`text-xs font-bold truncate ${!notif.read ? 'text-neutral-900' : 'text-neutral-700'}`}>
-                        {notif.title}
+                        {notif.actorName ? (
+                          <><span className="text-red-600">{notif.actorName}</span> — {notif.title}</>
+                        ) : notif.title}
                       </p>
                       <span className="text-[10px] text-neutral-400 shrink-0">
                         {notif.timestamp}
@@ -185,6 +187,11 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({ onNa
                     <p className="text-xs text-neutral-600 line-clamp-2 leading-relaxed">
                       {notif.message}
                     </p>
+                    {notif.changeDetail && (
+                      <p className="text-[10px] text-neutral-400 mt-0.5 font-medium truncate">
+                        📊 {notif.changeDetail}
+                      </p>
+                    )}
                   </div>
 
                   {!notif.read && (

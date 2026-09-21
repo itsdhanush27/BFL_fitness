@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Calendar, 
   Dumbbell, 
@@ -22,48 +22,165 @@ import {
   ExternalLink,
   ChevronDown,
   User as UserIcon,
-  Settings
+  Settings,
+  LogOut,
+  Target,
+  AlertTriangle,
+  Lock,
+  RefreshCw,
+  Zap,
+  ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useFitnessData } from '../../context/FitnessDataContext';
+import { useFitnessData, isPlanExpired, getDaysRemaining } from '../../context/FitnessDataContext';
 import { RestTimer } from '../common/RestTimer';
 import { WorkoutExercise } from '../../types';
 import { ProgressAnalyticsView } from './ProgressAnalyticsView';
 import { ClientProfileModal } from './ClientProfileModal';
+import { RenewalPaymentModal } from './RenewalPaymentModal';
 
-export const ClientDashboard: React.FC = () => {
-  const { user } = useAuth();
+interface ClientDashboardProps {
+  onLogout?: () => void;
+}
+
+export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) => {
+  const { user, signOut } = useAuth();
   const { 
     assignedWorkout, 
     nutritionPlan, 
     checkIns, 
     messages, 
+    clientIntake,
+    coaches,
+    coachingPlans,
+    clients,
     logWorkoutSet, 
     updateExerciseClientNotes, 
     completeWorkout, 
     submitWeeklyCheckIn, 
-    sendChatMessage 
+    sendChatMessage,
+    requestPlanRenewal
   } = useFitnessData();
 
   const [activeTab, setActiveTab] = useState<'schedule' | 'workout' | 'nutrition' | 'checkin' | 'chat' | 'progress'>('schedule');
   const [activeExerciseIndex, setActiveExerciseIndex] = useState<number>(0);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+
+  // Cross-check the live clients roster (updated synchronously by coach approval)
+  // to override any stale AuthContext user values from localStorage.
+  const clientRosterEntry = clients.find(
+    c => c.id === user?.uid || c.email === user?.email
+  );
+
+  // Merge: clients roster takes priority when it shows 'active' or 'pending'
+  const effectiveStatus: string =
+    (clientRosterEntry?.status as string) || (user as any)?.status || '';
+  const effectiveSubStatus: string =
+    (clientRosterEntry?.subscriptionStatus as string) || user?.subscriptionStatus || '';
+  const effectiveApprovalStatus: string =
+    (clientRosterEntry as any)?.approvalStatus || (user as any)?.approvalStatus || '';
+
+  // isRenewalPending MUST take priority over isExpired
+  // But if the roster or user shows 'active', we are NOT pending any more.
+  const isRenewalPending =
+    effectiveSubStatus !== 'active' &&
+    effectiveStatus !== 'active' &&
+    effectiveApprovalStatus !== 'approved' &&
+    (
+      effectiveSubStatus === 'pending_approval' ||
+      effectiveApprovalStatus === 'pending' ||
+      effectiveStatus === 'pending' ||
+      Boolean(user?.renewalRequestedPlanId || clientRosterEntry?.renewalRequestedPlanId)
+    );
+  const isExpired = !isRenewalPending && (
+    isPlanExpired({ 
+      planExpiresAt: clientRosterEntry?.planExpiresAt ?? user?.planExpiresAt, 
+      subscriptionStatus: effectiveSubStatus, 
+      status: effectiveStatus 
+    }) ||
+    effectiveStatus === 'expired' ||
+    effectiveSubStatus === 'expired'
+  );
+  const daysRemaining = getDaysRemaining(user?.planExpiresAt);
+  const expiryFormatted = user?.planExpiresAt 
+    ? new Date(user.planExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+
+  const [selectedRenewalPlanId, setSelectedRenewalPlanId] = useState<string>(user?.activePlanId || coachingPlans[0]?.id || 'plan_online_monthly');
+  const [isSubmittingRenewal, setIsSubmittingRenewal] = useState(false);
+  const [renewalSuccessMsg, setRenewalSuccessMsg] = useState(false);
+  const [showRenewalPayment, setShowRenewalPayment] = useState(false);
+
+  const handleRequestRenewal = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!user?.uid) return;
+    setIsSubmittingRenewal(true);
+    try {
+      await requestPlanRenewal(user.uid, selectedRenewalPlanId);
+      setRenewalSuccessMsg(true);
+      setTimeout(() => setRenewalSuccessMsg(false), 3000);
+    } catch (err) {
+      console.error('Renewal request failed:', err);
+    } finally {
+      setIsSubmittingRenewal(false);
+    }
+  };
+
+  // Dynamic Coach and Client Data Resolution
+  const clientCoachId = user?.assignedCoachId || user?.coachId || (clientIntake as any)?.assignedCoachId || (clientIntake as any)?.coachId;
+  const assignedCoach = coaches.find(c => c.id === clientCoachId) || coaches.find(c => c.id === 'admin_mass_narimanian') || coaches[0] || {
+    id: 'admin_mass_narimanian',
+    name: 'Mass Narimanian',
+    role: 'admin',
+    specialty: 'Co-Founder • Executive Physique & Hypertrophy Engineering',
+    email: 'mass@bflfitness.com',
+    avatarUrl: '/assets/founders/mass-gym.jpg'
+  };
+
+  const activePlan = coachingPlans.find(p => p.id === user?.activePlanId) || coachingPlans[0];
+  const clientDisplayName = user?.displayName || clientIntake?.clientName || 'Valued Athlete';
+  const isWorkoutAssignedToMe = Boolean(
+    assignedWorkout &&
+    (assignedWorkout.exercises?.length || 0) > 0 && (
+      assignedWorkout.clientId === user?.uid ||
+      assignedWorkout.clientId === user?.id ||
+      (user?.email && assignedWorkout.clientId?.toLowerCase() === user.email.toLowerCase()) ||
+      (clientIntake?.clientId && assignedWorkout.clientId === clientIntake.clientId)
+    )
+  );
+
+  const formatGoal = (goal?: string) => {
+    if (!goal) return 'Custom Protocol';
+    return goal.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  };
   
   // Workout completion celebration state
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [workoutRating, setWorkoutRating] = useState(5);
   const [workoutFeedback, setWorkoutFeedback] = useState('');
   
-  // Weekly Check-in Form State
-  const [checkInWeight, setCheckInWeight] = useState<number>(81.0);
+  // Weekly Check-in Form State (Pre-filled from onboarding intake if available)
+  const [checkInWeight, setCheckInWeight] = useState<number>(clientIntake?.currentWeightKg || 81.0);
   const [checkInAdherence, setCheckInAdherence] = useState<number>(9);
   const [checkInEnergy, setCheckInEnergy] = useState<number>(8);
   const [checkInSleep, setCheckInSleep] = useState<number>(7.5);
   const [checkInStress, setCheckInStress] = useState<number>(4);
   const [checkInHunger, setCheckInHunger] = useState<number>(5);
-  const [checkInWaist, setCheckInWaist] = useState<number>(83.0);
+  const [checkInWaist, setCheckInWaist] = useState<number>(clientIntake?.baselineMeasurements?.waistCm || 83.0);
   const [checkInWins, setCheckInWins] = useState<string>('');
   const [checkInSubmitted, setCheckInSubmitted] = useState(false);
+
+  // Sync check-in initial fields when clientIntake is fetched
+  useEffect(() => {
+    if (clientIntake) {
+      if (clientIntake.currentWeightKg) {
+        setCheckInWeight(clientIntake.currentWeightKg);
+      }
+      if (clientIntake.baselineMeasurements?.waistCm) {
+        setCheckInWaist(clientIntake.baselineMeasurements.waistCm);
+      }
+    }
+  }, [clientIntake]);
 
   // Chat message state
   const [chatInput, setChatInput] = useState('');
@@ -85,7 +202,16 @@ export const ClientDashboard: React.FC = () => {
     ]
   };
 
-  const workoutExercises = assignedWorkout?.exercises || [];
+  const displayWorkoutTitle = isWorkoutAssignedToMe && assignedWorkout?.title
+    ? assignedWorkout.title
+    : 'Custom Program In Development';
+  const displayWorkoutDescription = isWorkoutAssignedToMe && assignedWorkout?.description
+    ? assignedWorkout.description
+    : `Coach ${assignedCoach.name} is structuring your periodized split based on your onboarding intake.`;
+
+  const workoutExercises = isWorkoutAssignedToMe && assignedWorkout?.exercises?.length
+    ? assignedWorkout.exercises
+    : [];
   const currentExercise = workoutExercises[activeExerciseIndex] || workoutExercises[0] || fallbackExercise;
 
   const totalSets = workoutExercises.reduce((acc, ex) => acc + (ex.sets?.length || 0), 0);
@@ -115,8 +241,8 @@ export const ClientDashboard: React.FC = () => {
   const handleCheckInSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submitWeeklyCheckIn({
-      clientId: user?.uid || 'client_alex',
-      clientName: user?.displayName || 'Alex Rivera',
+      clientId: user?.uid || clientIntake?.clientId || 'client_athlete',
+      clientName: clientDisplayName,
       weekNumber: checkIns.length + 1,
       weightKg: checkInWeight,
       adherenceRating: checkInAdherence,
@@ -137,7 +263,7 @@ export const ClientDashboard: React.FC = () => {
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
-    sendChatMessage(chatInput.trim(), 'coach_marcus');
+    sendChatMessage(chatInput.trim(), assignedCoach.id);
     setChatInput('');
   };
 
@@ -157,16 +283,51 @@ export const ClientDashboard: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-black text-neutral-900 uppercase font-display tracking-tight">
-                  {user?.displayName || 'Alex Rivera'}
+                  {clientDisplayName}
                 </h1>
-                <span className="px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-600 text-[10px] font-bold uppercase tracking-wider">
-                  Active Client
-                </span>
+                {isExpired ? (
+                  <span className="px-2.5 py-0.5 rounded-full bg-red-100 border border-red-300 text-red-700 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs animate-pulse">
+                    <AlertTriangle className="w-3 h-3 text-red-600" />
+                    <span>Subscription Expired</span>
+                  </span>
+                ) : isRenewalPending ? (
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                    <Clock className="w-3 h-3 text-amber-600 animate-spin" />
+                    <span>Awaiting Program Initialization</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping inline-block" />
+                    <span>Active Athlete</span>
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-2">
-                <span>Coach: <strong className="text-neutral-800">Marcus Vance</strong></span>
+              <p className="text-xs text-neutral-500 mt-0.5 flex flex-wrap items-center gap-2">
+                <span>Coach: <strong className="text-neutral-800">{assignedCoach.name}</strong></span>
                 <span>&bull;</span>
-                <span>Plan: <strong className="text-red-600 font-semibold">1-on-1 Elite Coaching</strong></span>
+                <span>Plan: <strong className="text-red-600 font-semibold">{activePlan.name}</strong></span>
+                {isExpired ? (
+                  <>
+                    <span>&bull;</span>
+                    <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-700 font-bold border border-red-200">
+                      Package Finished {expiryFormatted ? `(${expiryFormatted})` : ''}
+                    </span>
+                  </>
+                ) : isRenewalPending ? (
+                  <>
+                    <span>&bull;</span>
+                    <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                      Coach Initializing Program...
+                    </span>
+                  </>
+                ) : user?.planExpiresAt ? (
+                  <>
+                    <span>&bull;</span>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+                      {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} left (Expires {expiryFormatted})
+                    </span>
+                  </>
+                ) : null}
               </p>
             </div>
           </div>
@@ -180,19 +341,44 @@ export const ClientDashboard: React.FC = () => {
               <UserIcon className="w-3.5 h-3.5 text-red-600" />
               <span>My Account</span>
             </button>
+            <button
+              id="dashboard-logout-button"
+              onClick={() => {
+                if (onLogout) {
+                  onLogout();
+                } else {
+                  signOut();
+                }
+              }}
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-red-50 text-xs font-bold text-neutral-700 hover:text-red-600 border border-neutral-200 hover:border-red-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5 text-red-600" />
+              <span>Log Out</span>
+            </button>
             {/* Quick Metrics Bar */}
             <div className="flex items-center gap-3 overflow-x-auto pb-1 sm:pb-0">
-              <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[95px] shadow-xs">
+              <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[100px] shadow-xs">
                 <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Weekly Target</span>
-                <span className="text-base font-black text-neutral-900 font-mono">4 / 4 Days</span>
+                <span className="text-base font-black text-neutral-900 font-mono">{clientIntake?.trainingDaysPerWeek || 4} Days</span>
+              </div>
+              <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[110px] shadow-xs">
+                <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Primary Goal</span>
+                <span className="text-xs font-black text-red-600 uppercase font-display truncate block mt-0.5">
+                  {formatGoal(clientIntake?.primaryGoal)}
+                </span>
+              </div>
+              <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[95px] shadow-xs">
+                <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Weight</span>
+                <span className="text-base font-black text-neutral-900 font-mono">
+                  {clientIntake?.currentWeightKg || checkInWeight} kg
+                </span>
               </div>
               <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[95px] shadow-xs">
                 <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Calories</span>
-                <span className="text-base font-black text-neutral-900 font-mono">{nutritionPlan.calories} kcal</span>
-              </div>
-              <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[95px] shadow-xs">
-                <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Next Check-In</span>
-                <span className="text-base font-black text-red-600 font-mono">Sunday</span>
+                <span className="text-base font-black text-neutral-900 font-mono">
+                  {nutritionPlan ? `${nutritionPlan.calories} kcal` : 'Pending'}
+                </span>
               </div>
             </div>
           </div>
@@ -201,12 +387,12 @@ export const ClientDashboard: React.FC = () => {
         {/* Tab Navigation */}
         <div className="max-w-7xl mx-auto flex items-center gap-2 mt-6 overflow-x-auto">
           {[
-            { id: 'schedule', label: 'Daily Schedule', icon: Calendar },
-            { id: 'workout', label: 'Workout Tracker', icon: Dumbbell, badge: assignedWorkout.isCompleted ? 'Done' : `${completedSets}/${totalSets}` },
-            { id: 'progress', label: 'Progress & Graphs', icon: TrendingUp },
-            { id: 'nutrition', label: 'Macros & Nutrition', icon: Flame },
-            { id: 'checkin', label: 'Weekly Check-in', icon: Activity },
-            { id: 'chat', label: 'Coach Messenger', icon: MessageSquare, badge: 'Direct' }
+            { id: 'schedule', label: 'Daily Schedule', icon: Calendar, locked: isExpired || isRenewalPending },
+            { id: 'workout', label: 'Workout Tracker', icon: Dumbbell, badge: isWorkoutAssignedToMe && assignedWorkout ? (assignedWorkout.isCompleted ? 'Done' : `${completedSets}/${totalSets}`) : undefined, locked: isExpired || isRenewalPending },
+            { id: 'progress', label: 'Progress & Graphs', icon: TrendingUp, locked: isExpired || isRenewalPending },
+            { id: 'nutrition', label: 'Macros & Nutrition', icon: Flame, locked: isExpired || isRenewalPending },
+            { id: 'checkin', label: 'Weekly Check-in', icon: Activity, locked: isExpired || isRenewalPending },
+            { id: 'chat', label: 'Coach Messenger', icon: MessageSquare, badge: 'Direct', locked: false }
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -220,13 +406,21 @@ export const ClientDashboard: React.FC = () => {
                     : 'bg-white hover:bg-neutral-50 text-neutral-600 hover:text-neutral-900 border border-neutral-200 shadow-xs'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                {tab.locked ? (
+                  <Lock className="w-3.5 h-3.5 text-neutral-400" />
+                ) : (
+                  <Icon className="w-4 h-4" />
+                )}
                 <span>{tab.label}</span>
-                {tab.badge && (
+                {tab.locked ? (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] bg-red-100 text-red-700 font-bold uppercase">
+                    Locked
+                  </span>
+                ) : tab.badge ? (
                   <span className={`px-1.5 py-0.2 rounded text-[10px] ${isActive ? 'bg-white/20 text-white' : 'bg-neutral-100 text-red-600 font-bold'}`}>
                     {tab.badge}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
@@ -235,58 +429,486 @@ export const ClientDashboard: React.FC = () => {
 
       {/* Main Tab Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        {/* 1. DAILY SCHEDULE */}
-        {activeTab === 'schedule' && (
-          <div className="space-y-8">
-            {/* Today's Hero Agenda Card */}
-            <div className="bg-gradient-to-br from-white via-neutral-50 to-red-50/40 border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-                <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 border border-red-200 text-red-600 text-xs font-bold uppercase tracking-wider">
-                    <Calendar className="w-3.5 h-3.5" /> Assigned for Today
+        {/* 0. PACKAGE EXPIRED LOCKDOWN VIEW */}
+        {isExpired && activeTab !== 'chat' ? (
+          <div className="space-y-8 animate-in fade-in duration-300">
+            {/* Urgency / Expiry Alert Card */}
+            <div className="bg-gradient-to-br from-red-950 via-neutral-900 to-neutral-950 border-2 border-red-600/60 rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden text-white">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-red-600/20 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-72 h-72 bg-red-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="relative z-10 max-w-3xl space-y-4">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-red-600/30 border border-red-500/50 text-red-300 text-xs font-black uppercase tracking-wider shadow-inner">
+                  <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse" />
+                  <span>Coaching Package Finished • Portal Locked</span>
+                </div>
+
+                <h2 className="text-2xl sm:text-4xl font-black uppercase font-display tracking-tight text-white leading-tight">
+                  Your Package Timeline Has Finished
+                </h2>
+
+                <p className="text-neutral-300 text-sm sm:text-base leading-relaxed">
+                  Your active enrollment in <strong className="text-white font-bold">{activePlan.name}</strong> has concluded{expiryFormatted ? ` as of ${expiryFormatted}` : ''}. In accordance with BFL Elite Standards, workout tracking, macronutrient targets, weekly check-in submissions, and progress charting are paused until you re-enroll.
+                </p>
+
+                <div className="pt-2 flex flex-wrap items-center gap-3 text-xs">
+                  <div className="px-3 py-1.5 rounded-xl bg-neutral-900/80 border border-neutral-700/80 text-neutral-300 flex items-center gap-2 font-mono">
+                    <Lock className="w-3.5 h-3.5 text-red-400" />
+                    <span>Workout Tracker Locked</span>
                   </div>
-                  <h2 className="text-2xl sm:text-4xl font-black text-neutral-900 uppercase font-display tracking-tight">
-                    {assignedWorkout.title}
-                  </h2>
-                  <p className="text-sm text-neutral-600 max-w-2xl">
-                    {assignedWorkout.description}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {assignedWorkout.isCompleted ? (
-                    <div className="px-5 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center gap-2 text-sm font-bold shadow-xs">
-                      <CheckCircle2 className="w-5 h-5" />
-                      <span>Workout Completed at {assignedWorkout.completedAt || 'Today'}</span>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setActiveTab('workout')}
-                      className="px-6 py-3.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-sm uppercase tracking-wider flex items-center gap-2 shadow-md shadow-red-200 cursor-pointer transition-transform hover:scale-102"
-                    >
-                      <Play className="w-4 h-4 fill-white" />
-                      <span>Start Workout ({completedSets}/{totalSets} Sets)</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress meter */}
-              <div className="mt-6 pt-6 border-t border-neutral-200 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <p className="text-xs text-neutral-500 uppercase font-semibold">Exercise Count</p>
-                  <p className="text-lg font-black text-neutral-900 font-mono">{workoutExercises.length} Exercises</p>
-                </div>
-                <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <p className="text-xs text-neutral-500 uppercase font-semibold">Volume Target</p>
-                  <p className="text-lg font-black text-neutral-900 font-mono">{totalSets} Total Working Sets</p>
-                </div>
-                <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <p className="text-xs text-neutral-500 uppercase font-semibold">Estimated Duration</p>
-                  <p className="text-lg font-black text-red-600 font-mono">55 - 65 Minutes</p>
+                  <div className="px-3 py-1.5 rounded-xl bg-neutral-900/80 border border-neutral-700/80 text-neutral-300 flex items-center gap-2 font-mono">
+                    <Lock className="w-3.5 h-3.5 text-red-400" />
+                    <span>Macros & Nutrition Locked</span>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-xl bg-neutral-900/80 border border-neutral-700/80 text-neutral-300 flex items-center gap-2 font-mono">
+                    <Lock className="w-3.5 h-3.5 text-red-400" />
+                    <span>Weekly Check-in Locked</span>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className="px-3.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-600 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-red-400" />
+                    <span>Message Coach</span>
+                  </button>
                 </div>
               </div>
             </div>
+
+            {/* Package Selection & Re-Enrollment Selector */}
+            <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 pb-5">
+                <div>
+                  <h3 className="text-xl font-black text-neutral-900 uppercase font-display">
+                    Re-Enroll In Your Coaching Package
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    Select either the same package or choose a different discipline. Upon submission, Coach Mass & Coach Pouya will review and initialize your next routine block.
+                  </p>
+                </div>
+
+                {renewalSuccessMsg && (
+                  <div className="px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Renewal Request Sent to Admin!</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 7 Official BFL Packages Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {coachingPlans.map((plan) => {
+                  const isSelected = selectedRenewalPlanId === plan.id;
+                  const isCurrent = user?.activePlanId === plan.id;
+
+                  return (
+                    <div
+                      key={plan.id}
+                      onClick={() => setSelectedRenewalPlanId(plan.id)}
+                      className={`rounded-2xl p-5 border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
+                        isSelected
+                          ? 'border-red-600 bg-red-50/20 shadow-md shadow-red-100 ring-2 ring-red-500/20'
+                          : 'border-neutral-200 hover:border-neutral-300 bg-white hover:bg-neutral-50/50 shadow-2xs'
+                      }`}
+                    >
+                      {/* Top Badges */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          plan.category === 'boxing' ? 'bg-amber-100 text-amber-800' :
+                          plan.category === 'powerlifting' ? 'bg-purple-100 text-purple-800' :
+                          plan.category === 'face_to_face' ? 'bg-blue-100 text-blue-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {plan.category ? plan.category.replace(/_/g, ' ') : 'Coaching'}
+                        </span>
+
+                        <div className="flex items-center gap-1.5">
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 text-[10px] font-semibold">
+                              Previous
+                            </span>
+                          )}
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            isSelected ? 'border-red-600 bg-red-600' : 'border-neutral-300'
+                          }`}>
+                            {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Title & Price */}
+                      <div className="space-y-1 mb-4">
+                        <h4 className="font-black text-base text-neutral-900 font-display uppercase tracking-tight">
+                          {plan.name}
+                        </h4>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-2xl font-black text-neutral-900 font-mono">${plan.price}</span>
+                          <span className="text-xs text-neutral-500 font-semibold">{plan.period}</span>
+                        </div>
+                        <p className="text-xs text-neutral-600 line-clamp-2 mt-1">
+                          {plan.tagline}
+                        </p>
+                      </div>
+
+                      {/* Features List */}
+                      <div className="space-y-1.5 border-t border-neutral-100 pt-3 text-xs text-neutral-600">
+                        {plan.features.slice(0, 3).map((feat, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5">
+                            <Check className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                            <span className="truncate">{feat}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Confirm Re-Enrollment CTA Bar */}
+              <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block">
+                    Selected Re-Enrollment Plan
+                  </span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg font-black text-neutral-900 uppercase font-display">
+                      {coachingPlans.find(p => p.id === selectedRenewalPlanId)?.name || 'Selected Package'}
+                    </span>
+                    <span className="text-base font-black text-red-600 font-mono">
+                      ${coachingPlans.find(p => p.id === selectedRenewalPlanId)?.price}
+                    </span>
+                    <span className="text-xs text-neutral-500 font-semibold">
+                      {coachingPlans.find(p => p.id === selectedRenewalPlanId)?.period}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-500">
+                    Administrator Coach Mass or Coach Pouya will receive an instant notification to approve and initialize your new routine.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setShowRenewalPayment(true)}
+                  disabled={isSubmittingRenewal}
+                  className="px-6 py-3.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:bg-neutral-400 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-200 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  {isSubmittingRenewal ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Submitting To Coach...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-white" />
+                      <span>Proceed to Payment & Re-Enroll</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : isRenewalPending && activeTab !== 'chat' ? (
+          <div className="space-y-6 animate-in fade-in duration-300">
+
+            {/* ── MAIN WAITING HERO CARD ── */}
+            <div className="bg-gradient-to-br from-neutral-950 via-neutral-900 to-amber-950/60 border-2 border-amber-500/50 rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden text-white">
+              <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-16 -left-16 w-64 h-64 bg-red-600/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="relative z-10 space-y-6 max-w-3xl">
+                {/* Status pill */}
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 text-xs font-black uppercase tracking-widest shadow-inner">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block" />
+                  <span>Payment Confirmed · Awaiting Coach Program Initialization</span>
+                </div>
+
+                {/* Main Heading */}
+                <div className="space-y-2">
+                  <h2 className="text-3xl sm:text-5xl font-black uppercase font-display tracking-tight text-white leading-tight">
+                    Wait Till Coach
+                    <br />
+                    <span className="text-amber-400">Initializes Your</span>
+                    <br />
+                    Program
+                  </h2>
+                  <p className="text-neutral-300 text-sm sm:text-base leading-relaxed max-w-xl">
+                    Your payment for{' '}
+                    <strong className="text-white font-bold">{user?.renewalRequestedPlanName || activePlan.name}</strong>
+                    {user?.renewalRequestedPlanPrice ? (
+                      <span className="text-amber-400 font-black font-mono"> (${user.renewalRequestedPlanPrice})</span>
+                    ) : null}{' '}
+                    has been received. Coach{' '}
+                    <strong className="text-amber-400">Mass Narimanian</strong> &{' '}
+                    <strong className="text-amber-400">Coach Pouya Marghzari</strong>{' '}
+                    are now building your custom periodized routine and macro prescription from scratch.
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className="px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-900/40 transition-all cursor-pointer"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Message Coach Directly</span>
+                  </button>
+                  <button
+                    onClick={() => setProfileModalOpen(true)}
+                    className="px-4 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-2"
+                  >
+                    <UserIcon className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>View Subscription</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── INITIALIZATION PROGRESS STEPS ── */}
+            <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-black text-neutral-900 uppercase font-display tracking-tight">
+                    Program Initialization Pipeline
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Your portal unlocks automatically once the coach completes step 4.
+                  </p>
+                </div>
+                <div className="px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-amber-500 animate-spin" />
+                  <span>In Progress</span>
+                </div>
+              </div>
+
+              <div className="space-y-0">
+                {[
+                  {
+                    step: 1,
+                    label: 'Payment Processed',
+                    detail: `$${user?.renewalRequestedPlanPrice || activePlan.price} collected · Receipt sent to ${user?.email || 'your email'}`,
+                    status: 'done'
+                  },
+                  {
+                    step: 2,
+                    label: 'Renewal Request Submitted to Admin',
+                    detail: 'Coach Mass & Coach Pouya have been notified with your plan selection and biometric history.',
+                    status: 'done'
+                  },
+                  {
+                    step: 3,
+                    label: 'Coach Reviewing Your Biometrics & History',
+                    detail: 'Your check-in logs, progress photos and onboarding data are being analyzed to tailor your next block.',
+                    status: 'active'
+                  },
+                  {
+                    step: 4,
+                    label: 'Custom Program & Macros Being Built',
+                    detail: 'Personalized periodized split, RPE targets and macro prescription are being written for your new cycle.',
+                    status: 'pending'
+                  },
+                  {
+                    step: 5,
+                    label: 'Portal Unlocks — You\'re Back in the Game',
+                    detail: 'All dashboard features re-activate: Workout Tracker, Nutrition Plan, Check-ins & Progress Charts.',
+                    status: 'pending'
+                  }
+                ].map((item, idx, arr) => (
+                  <div key={item.step} className="flex gap-4">
+                    {/* Step indicator + connector line */}
+                    <div className="flex flex-col items-center">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 border-2 font-black text-sm transition-all ${
+                        item.status === 'done'
+                          ? 'bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-200'
+                          : item.status === 'active'
+                          ? 'bg-amber-500 border-amber-400 text-neutral-950 shadow-md shadow-amber-200 animate-pulse'
+                          : 'bg-neutral-100 border-neutral-200 text-neutral-400'
+                      }`}>
+                        {item.status === 'done' ? (
+                          <CheckCircle2 className="w-5 h-5 text-white" />
+                        ) : item.status === 'active' ? (
+                          <Clock className="w-4 h-4 text-neutral-900" />
+                        ) : (
+                          <span className="text-xs font-black">{item.step}</span>
+                        )}
+                      </div>
+                      {idx < arr.length - 1 && (
+                        <div className={`w-0.5 h-8 mt-1 mb-1 rounded-full ${
+                          item.status === 'done' ? 'bg-emerald-300' : 'bg-neutral-200'
+                        }`} />
+                      )}
+                    </div>
+
+                    {/* Step content */}
+                    <div className={`pb-6 flex-1 ${idx === arr.length - 1 ? 'pb-0' : ''}`}>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <p className={`text-sm font-black uppercase font-display tracking-tight ${
+                          item.status === 'done'
+                            ? 'text-emerald-700'
+                            : item.status === 'active'
+                            ? 'text-amber-700'
+                            : 'text-neutral-400'
+                        }`}>
+                          {item.label}
+                        </p>
+                        {item.status === 'done' && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-bold uppercase">
+                            Complete
+                          </span>
+                        )}
+                        {item.status === 'active' && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-700 text-[9px] font-bold uppercase animate-pulse">
+                            In Progress
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500 mt-0.5 leading-relaxed">{item.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── LOCKED FEATURES STRIP ── */}
+            <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 sm:p-5 flex flex-wrap items-center gap-3">
+              <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider shrink-0">Locked Until Coach Initializes:</span>
+              {[
+                { icon: Dumbbell, label: 'Workout Tracker' },
+                { icon: Flame, label: 'Macros & Nutrition' },
+                { icon: Activity, label: 'Weekly Check-in' },
+                { icon: TrendingUp, label: 'Progress & Graphs' }
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="px-3 py-1.5 rounded-xl bg-white border border-neutral-200 text-neutral-500 text-xs font-semibold flex items-center gap-1.5 shadow-xs">
+                  <Lock className="w-3 h-3 text-red-400" />
+                  <Icon className="w-3 h-3" />
+                  <span>{label}</span>
+                </div>
+              ))}
+              <button
+                onClick={() => setActiveTab('chat')}
+                className="ml-auto px-4 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                <span>Chat With Coach</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* 1. DAILY SCHEDULE */}
+            {activeTab === 'schedule' && (
+          <div className="space-y-8">
+            {/* Today's Hero Agenda Card */}
+            {!isWorkoutAssignedToMe ? (
+              <div className="bg-gradient-to-br from-white via-neutral-50 to-red-50/40 border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs relative overflow-hidden">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+                  <div className="space-y-2">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Intake Form Received & Verified
+                    </div>
+                    <h2 className="text-2xl sm:text-4xl font-black text-neutral-900 uppercase font-display tracking-tight">
+                      Custom Program In Development
+                    </h2>
+                    <p className="text-sm text-neutral-600 max-w-2xl">
+                      Welcome, <strong className="text-neutral-900">{clientDisplayName}</strong>! Lead Coach <strong className="text-neutral-900">{assignedCoach.name}</strong> has received your onboarding submission and is tailoring your periodized split targeting <span className="text-red-600 font-bold uppercase">{formatGoal(clientIntake?.primaryGoal)}</span>.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => setActiveTab('workout')}
+                      className="px-5 py-3 rounded-2xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-xs cursor-pointer transition-all"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>View Program Status</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('chat')}
+                      className="px-5 py-3 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-red-200 cursor-pointer transition-all"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Message Coach</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Intake Baseline Snapshot */}
+                <div className="mt-6 pt-6 border-t border-neutral-200 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-[10px] text-neutral-500 uppercase font-semibold">Weekly Frequency</p>
+                    <p className="text-base font-black text-neutral-900 font-mono">
+                      {clientIntake?.trainingDaysPerWeek || 4} Days / Week
+                    </p>
+                  </div>
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-[10px] text-neutral-500 uppercase font-semibold">Training Facility</p>
+                    <p className="text-base font-black text-neutral-900 capitalize font-mono truncate">
+                      {clientIntake?.trainingLocation?.replace(/_/g, ' ') || 'Commercial Gym'}
+                    </p>
+                  </div>
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-[10px] text-neutral-500 uppercase font-semibold">Weight Target</p>
+                    <p className="text-base font-black text-red-600 font-mono">
+                      {clientIntake?.currentWeightKg || '--'}kg &rarr; {clientIntake?.targetWeightKg || '--'}kg
+                    </p>
+                  </div>
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-[10px] text-neutral-500 uppercase font-semibold">Nutrition Strategy</p>
+                    <p className="text-base font-black text-neutral-900 capitalize font-mono truncate">
+                      {clientIntake?.dietaryPreference?.replace(/_/g, ' ') || 'Flexible'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gradient-to-br from-white via-neutral-50 to-red-50/40 border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+                  <div className="space-y-2">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 border border-red-200 text-red-600 text-xs font-bold uppercase tracking-wider">
+                      <Calendar className="w-3.5 h-3.5" /> Assigned for Today
+                    </div>
+                    <h2 className="text-2xl sm:text-4xl font-black text-neutral-900 uppercase font-display tracking-tight">
+                      {displayWorkoutTitle}
+                    </h2>
+                    <p className="text-sm text-neutral-600 max-w-2xl">
+                      {displayWorkoutDescription}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    {assignedWorkout?.isCompleted ? (
+                      <div className="px-5 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center gap-2 text-sm font-bold shadow-xs">
+                        <CheckCircle2 className="w-5 h-5" />
+                        <span>Workout Completed at {assignedWorkout?.completedAt || 'Today'}</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setActiveTab('workout')}
+                        className="px-6 py-3.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-sm uppercase tracking-wider flex items-center gap-2 shadow-md shadow-red-200 cursor-pointer transition-transform hover:scale-102"
+                      >
+                        <Play className="w-4 h-4 fill-white" />
+                        <span>Start Workout ({completedSets}/{totalSets} Sets)</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress meter */}
+                <div className="mt-6 pt-6 border-t border-neutral-200 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-xs text-neutral-500 uppercase font-semibold">Exercise Count</p>
+                    <p className="text-lg font-black text-neutral-900 font-mono">{workoutExercises.length} Exercises</p>
+                  </div>
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-xs text-neutral-500 uppercase font-semibold">Volume Target</p>
+                    <p className="text-lg font-black text-neutral-900 font-mono">{totalSets} Total Working Sets</p>
+                  </div>
+                  <div className="bg-white p-3.5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <p className="text-xs text-neutral-500 uppercase font-semibold">Estimated Duration</p>
+                    <p className="text-lg font-black text-red-600 font-mono">55 - 65 Minutes</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Daily Schedule Checklist (Workout, Nutrition, Check-in) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -298,21 +920,25 @@ export const ClientDashboard: React.FC = () => {
                       <Dumbbell className="w-5 h-5" />
                     </div>
                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
-                      assignedWorkout.isCompleted ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-neutral-100 text-neutral-700 border border-neutral-200'
+                      assignedWorkout?.isCompleted ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-neutral-100 text-neutral-700 border border-neutral-200'
                     }`}>
-                      {assignedWorkout.isCompleted ? 'Done' : 'Pending'}
+                      {assignedWorkout?.isCompleted ? 'Done' : isWorkoutAssignedToMe ? 'Pending' : 'Building'}
                     </span>
                   </div>
-                  <h3 className="text-lg font-bold text-neutral-900 uppercase font-display">Upper Hypertrophy</h3>
+                  <h3 className="text-lg font-bold text-neutral-900 uppercase font-display">
+                    {isWorkoutAssignedToMe && assignedWorkout ? assignedWorkout.title : 'Program Development'}
+                  </h3>
                   <p className="text-xs text-neutral-500 mt-1">
-                    Chest & Deltoid progressive overload. Log each set in real time with RPE.
+                    {isWorkoutAssignedToMe && assignedWorkout
+                      ? (assignedWorkout.description || 'Log each set in real time with RPE.')
+                      : `Coach ${assignedCoach.name} is structuring your exercises based on your ${clientIntake?.trainingDaysPerWeek || 4}-day split.`}
                   </p>
                 </div>
                 <button
                   onClick={() => setActiveTab('workout')}
                   className="mt-6 w-full py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition-colors"
                 >
-                  <span>Open Workout</span>
+                  <span>{isWorkoutAssignedToMe ? 'Open Workout' : 'View Program Status'}</span>
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -325,19 +951,29 @@ export const ClientDashboard: React.FC = () => {
                       <Flame className="w-5 h-5" />
                     </div>
                     <span className="px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200 text-xs font-bold uppercase">
-                      Target: {nutritionPlan.calories} kcal
+                      {nutritionPlan ? `Target: ${nutritionPlan.calories} kcal` : 'Prescription Pending'}
                     </span>
                   </div>
-                  <h3 className="text-lg font-bold text-neutral-900 uppercase font-display">Macro Adherence</h3>
+                  <h3 className="text-lg font-bold text-neutral-900 uppercase font-display">
+                    {nutritionPlan ? 'Macro Adherence' : 'Nutrition Protocol'}
+                  </h3>
                   <p className="text-xs text-neutral-500 mt-1">
-                    Protein: <strong className="text-neutral-800">{nutritionPlan.proteinGrams}g</strong> &bull; Carbs: <strong className="text-neutral-800">{nutritionPlan.carbsGrams}g</strong> &bull; Fats: <strong className="text-neutral-800">{nutritionPlan.fatGrams}g</strong>
+                    {nutritionPlan ? (
+                      <>
+                        Protein: <strong className="text-neutral-800">{nutritionPlan.proteinGrams}g</strong> &bull; Carbs: <strong className="text-neutral-800">{nutritionPlan.carbsGrams}g</strong> &bull; Fats: <strong className="text-neutral-800">{nutritionPlan.fatGrams}g</strong>
+                      </>
+                    ) : (
+                      <>
+                        Coach {assignedCoach.name} is finalizing your caloric & macro targets for your {clientIntake?.dietaryPreference?.replace(/_/g, ' ') || 'dietary strategy'}.
+                      </>
+                    )}
                   </p>
                 </div>
                 <button
                   onClick={() => setActiveTab('nutrition')}
                   className="mt-6 w-full py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition-colors"
                 >
-                  <span>View Nutrition Plan</span>
+                  <span>{nutritionPlan ? 'View Nutrition Plan' : 'View Dietary Submission'}</span>
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -373,12 +1009,40 @@ export const ClientDashboard: React.FC = () => {
         {/* 2. WORKOUT INTERFACE & TRACKING */}
         {activeTab === 'workout' && (
           <div className="space-y-6">
-            {/* Header & completion trigger */}
-            <div className="bg-white border border-neutral-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+            {!isWorkoutAssignedToMe ? (
+              <div className="bg-white border border-neutral-200 rounded-3xl p-10 sm:p-14 text-center max-w-2xl mx-auto shadow-xs space-y-5">
+                <div className="w-16 h-16 rounded-2xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center mx-auto">
+                  <Dumbbell className="w-8 h-8" />
+                </div>
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold uppercase tracking-wider">
+                    <Clock className="w-3.5 h-3.5" /> Program Assignment In Progress
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-neutral-900 uppercase font-display">
+                    Your Coach Is Finalizing Your Routine
+                  </h2>
+                  <p className="text-xs sm:text-sm text-neutral-600 max-w-md mx-auto leading-relaxed">
+                    Lead Coach <strong className="text-neutral-900">{assignedCoach.name}</strong> is reviewing your equipment list ({clientIntake?.availableEquipment?.slice(0, 3).join(', ') || 'Gym facilities'}) and tailoring exercises to your goal (<span className="text-red-600 font-bold uppercase">{formatGoal(clientIntake?.primaryGoal)}</span>).
+                  </p>
+                </div>
+                <div className="pt-3 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className="px-6 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider shadow-md shadow-red-200 cursor-pointer transition-all flex items-center gap-2"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Ask Coach a Question</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Header & completion trigger */}
+                <div className="bg-white border border-neutral-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
               <div>
                 <span className="text-xs font-bold text-red-600 uppercase tracking-wider">Active Session</span>
                 <h2 className="text-2xl font-black text-neutral-900 uppercase font-display">
-                  {assignedWorkout.title}
+                  {displayWorkoutTitle}
                 </h2>
                 <div className="flex items-center gap-4 mt-2 text-xs text-neutral-500">
                   <span>Sets Completed: <strong className="text-neutral-900">{completedSets} / {totalSets}</strong></span>
@@ -604,121 +1268,202 @@ export const ClientDashboard: React.FC = () => {
                 </button>
 
                 <button
-                  disabled={activeExerciseIndex === assignedWorkout.exercises.length - 1}
-                  onClick={() => setActiveExerciseIndex(prev => Math.min(assignedWorkout.exercises.length - 1, prev + 1))}
+                  disabled={activeExerciseIndex === workoutExercises.length - 1}
+                  onClick={() => setActiveExerciseIndex(prev => Math.min(workoutExercises.length - 1, prev + 1))}
                   className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-wider disabled:opacity-30 cursor-pointer shadow-md shadow-red-200 transition-colors"
                 >
                   Next Exercise &rarr;
                 </button>
               </div>
             </div>
+              </>
+            )}
           </div>
         )}
 
         {/* 3. MACROS & NUTRITION VIEW */}
         {activeTab === 'nutrition' && (
           <div className="space-y-8">
-            <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+            {nutritionPlan ? (
+              <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+                  <div>
+                    <span className="text-xs font-bold text-red-600 uppercase tracking-wider">Metabolic Targets</span>
+                    <h2 className="text-2xl sm:text-3xl font-black text-neutral-900 uppercase font-display">
+                      Daily Nutrition & Macronutrient Prescription
+                    </h2>
+                    <p className="text-xs text-neutral-500 mt-1">
+                      Prescribed by Coach {assignedCoach.name} &bull; Last updated {nutritionPlan.updatedAt}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-4xl font-black text-neutral-900 font-mono">{nutritionPlan.calories}</span>
+                    <span className="text-xs text-neutral-500 block font-semibold">Total Caloric Ceiling</span>
+                  </div>
+                </div>
+
+                {/* Macro Bars Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Protein (4 kcal/g)</span>
+                      <span className="text-xl font-black text-neutral-900 font-mono">{nutritionPlan.proteinGrams}g</span>
+                    </div>
+                    <div className="w-full bg-neutral-200 h-2 rounded-full overflow-hidden">
+                      <div className="bg-red-600 h-full w-[85%]" />
+                    </div>
+                    <p className="text-[11px] text-neutral-500 mt-2">
+                      Targets 2.4g/kg of lean body mass for maximal muscle protein synthesis.
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Carbohydrates</span>
+                      <span className="text-xl font-black text-neutral-900 font-mono">{nutritionPlan.carbsGrams}g</span>
+                    </div>
+                    <div className="w-full bg-neutral-200 h-2 rounded-full overflow-hidden">
+                      <div className="bg-amber-500 h-full w-[70%]" />
+                    </div>
+                    <p className="text-[11px] text-neutral-500 mt-2">
+                      Focus ~60g before training and ~60g post-workout for glycogen replenishment.
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Fats (9 kcal/g)</span>
+                      <span className="text-xl font-black text-neutral-900 font-mono">{nutritionPlan.fatGrams}g</span>
+                    </div>
+                    <div className="w-full bg-neutral-200 h-2 rounded-full overflow-hidden">
+                      <div className="bg-blue-600 h-full w-[60%]" />
+                    </div>
+                    <p className="text-[11px] text-neutral-500 mt-2">
+                      Essential fatty acids for endocrine health, testosterone, and joint mobility.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Water & Hydration Card */}
+                <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-200 flex items-center justify-between mb-8 shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                      <Droplet className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-neutral-900 uppercase">Daily Hydration Baseline</h4>
+                      <p className="text-xs text-neutral-500">Essential for intramuscular hydration and creatine absorption.</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-neutral-900 font-mono">{nutritionPlan.waterLiters} Liters</span>
+                  </div>
+                </div>
+
+                {/* Coach Guidelines & Supplement Protocols */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
+                      Meal Timing & Satiety Notes
+                    </h4>
+                    <p className="text-xs sm:text-sm text-neutral-700 leading-relaxed">
+                      {nutritionPlan.dailyNotes}
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
+                      Supplement Protocol
+                    </h4>
+                    <ul className="space-y-1.5 text-xs sm:text-sm text-neutral-700">
+                      {nutritionPlan.supplementGuide.map((sup, idx) => (
+                        <li key={idx} className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-red-600" />
+                          <span>{sup}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white border border-neutral-200 rounded-3xl p-8 text-center max-w-2xl mx-auto shadow-xs space-y-5">
+                <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+                  <Flame className="w-8 h-8" />
+                </div>
                 <div>
-                  <span className="text-xs font-bold text-red-600 uppercase tracking-wider">Metabolic Targets</span>
-                  <h2 className="text-2xl sm:text-3xl font-black text-neutral-900 uppercase font-display">
-                    Daily Nutrition & Macronutrient Prescription
+                  <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">Protocol In Progress</span>
+                  <h2 className="text-2xl font-black text-neutral-900 uppercase font-display mt-1">
+                    Macro Targets in Development
                   </h2>
-                  <p className="text-xs text-neutral-500 mt-1">
-                    Prescribed by Coach Marcus Vance &bull; Last updated {nutritionPlan.updatedAt}
+                  <p className="text-xs sm:text-sm text-neutral-500 max-w-lg mx-auto mt-2 leading-relaxed">
+                    Coach {assignedCoach.name} is calculating your personalized caloric ceiling, protein targets, and nutrient timing based on your submitted onboarding metrics.
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-4xl font-black text-neutral-900 font-mono">{nutritionPlan.calories}</span>
-                  <span className="text-xs text-neutral-500 block font-semibold">Total Caloric Ceiling</span>
-                </div>
-              </div>
-
-              {/* Macro Bars Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Protein (4 kcal/g)</span>
-                    <span className="text-xl font-black text-neutral-900 font-mono">{nutritionPlan.proteinGrams}g</span>
-                  </div>
-                  <div className="w-full bg-neutral-200 h-2 rounded-full overflow-hidden">
-                    <div className="bg-red-600 h-full w-[85%]" />
-                  </div>
-                  <p className="text-[11px] text-neutral-500 mt-2">
-                    Targets 2.4g/kg of lean body mass for maximal muscle protein synthesis.
-                  </p>
-                </div>
-
-                <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Carbohydrates</span>
-                    <span className="text-xl font-black text-neutral-900 font-mono">{nutritionPlan.carbsGrams}g</span>
-                  </div>
-                  <div className="w-full bg-neutral-200 h-2 rounded-full overflow-hidden">
-                    <div className="bg-amber-500 h-full w-[70%]" />
-                  </div>
-                  <p className="text-[11px] text-neutral-500 mt-2">
-                    Focus ~60g before training and ~60g post-workout for glycogen replenishment.
-                  </p>
-                </div>
-
-                <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Fats (9 kcal/g)</span>
-                    <span className="text-xl font-black text-neutral-900 font-mono">{nutritionPlan.fatGrams}g</span>
-                  </div>
-                  <div className="w-full bg-neutral-200 h-2 rounded-full overflow-hidden">
-                    <div className="bg-blue-600 h-full w-[60%]" />
-                  </div>
-                  <p className="text-[11px] text-neutral-500 mt-2">
-                    Essential fatty acids for endocrine health, testosterone, and joint mobility.
-                  </p>
-                </div>
-              </div>
-
-              {/* Water & Hydration Card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-200 flex items-center justify-between mb-8 shadow-xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
-                    <Droplet className="w-5 h-5" />
+                <div className="grid grid-cols-3 gap-3 max-w-md mx-auto p-4 bg-neutral-50 rounded-2xl border border-neutral-200 text-left">
+                  <div>
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Current Weight</span>
+                    <span className="text-sm font-black text-neutral-900 font-mono">
+                      {clientIntake?.currentWeightKg || checkInWeight} kg
+                    </span>
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-neutral-900 uppercase">Daily Hydration Baseline</h4>
-                    <p className="text-xs text-neutral-500">Essential for intramuscular hydration and creatine absorption.</p>
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Target Split</span>
+                    <span className="text-sm font-black text-neutral-900 font-mono">
+                      {clientIntake?.trainingDaysPerWeek || 4} Days/wk
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Diet Strategy</span>
+                    <span className="text-xs font-bold text-red-600 uppercase font-display truncate block mt-0.5">
+                      {clientIntake?.dietaryPreference?.replace(/_/g, ' ') || 'Flexible'}
+                    </span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-2xl font-black text-neutral-900 font-mono">{nutritionPlan.waterLiters} Liters</span>
+              </div>
+            )}
+
+            {/* Real Onboarding Nutrition Submissions */}
+            {clientIntake && (
+              <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-xs font-bold text-red-600 uppercase tracking-wider">
+                    Onboarding Dietary Submission
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                    Verified from Form
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200">
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Diet Strategy</span>
+                    <span className="text-sm font-bold text-neutral-900 capitalize block mt-0.5">
+                      {clientIntake.dietaryPreference?.replace(/_/g, ' ') || 'Flexible Dieting'}
+                    </span>
+                  </div>
+                  <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200">
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Meals Per Day</span>
+                    <span className="text-sm font-bold text-neutral-900 block mt-0.5">
+                      {clientIntake.mealsPerDay || 4} Meals / Day
+                    </span>
+                  </div>
+                  <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200">
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Allergies & Excluded</span>
+                    <span className="text-xs font-bold text-neutral-900 truncate block mt-0.5">
+                      {clientIntake.foodAllergies && clientIntake.foodAllergies !== 'None' 
+                        ? clientIntake.foodAllergies 
+                        : (clientIntake.excludedFoods || 'None reported')}
+                    </span>
+                  </div>
+                  <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200">
+                    <span className="text-[10px] text-neutral-500 uppercase font-bold block">Supplement History</span>
+                    <span className="text-xs font-bold text-neutral-900 truncate block mt-0.5">
+                      {clientIntake.supplementHistory || 'Creatine, Whey'}
+                    </span>
+                  </div>
                 </div>
               </div>
-
-              {/* Coach Guidelines & Supplement Protocols */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
-                    Meal Timing & Satiety Notes
-                  </h4>
-                  <p className="text-xs sm:text-sm text-neutral-700 leading-relaxed">
-                    {nutritionPlan.dailyNotes}
-                  </p>
-                </div>
-
-                <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 shadow-xs">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
-                    Supplement Protocol
-                  </h4>
-                  <ul className="space-y-1.5 text-xs sm:text-sm text-neutral-700">
-                    {nutritionPlan.supplementGuide.map((sup, idx) => (
-                      <li key={idx} className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-red-600" />
-                        <span>{sup}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -734,7 +1479,7 @@ export const ClientDashboard: React.FC = () => {
                     Submit Week {checkIns.length + 1} Check-In
                   </h2>
                   <p className="text-xs text-neutral-500 mt-1">
-                    Coach Marcus uses this data to adjust your calories and training volume for the upcoming microcycle.
+                    Coach {assignedCoach.name} uses this data to adjust your calories and training volume for the upcoming microcycle.
                   </p>
                 </div>
 
@@ -743,7 +1488,7 @@ export const ClientDashboard: React.FC = () => {
                     <CheckCircle2 className="w-12 h-12 text-red-600 mx-auto animate-pulse" />
                     <h3 className="text-xl font-bold text-neutral-900 uppercase">Check-in Transmitted!</h3>
                     <p className="text-xs text-neutral-600">
-                      Your metrics and notes have been logged for review. Coach Marcus will publish feedback within 24 hours.
+                      Your metrics and notes have been logged for review. Coach {assignedCoach.name} will publish feedback within 24 hours.
                     </p>
                   </div>
                 ) : (
@@ -865,48 +1610,58 @@ export const ClientDashboard: React.FC = () => {
                   Check-In History & Feedback
                 </h3>
 
-                {checkIns.map((ci) => (
-                  <div key={ci.id} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-3 shadow-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 rounded-md bg-neutral-100 text-neutral-800 text-xs font-bold font-mono">
-                        Week #{ci.weekNumber}
-                      </span>
-                      <span className="text-xs text-neutral-500 font-mono">{ci.submissionDate}</span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                      <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-200">
-                        <span className="text-[10px] text-neutral-500 block">Weight</span>
-                        <strong className="text-neutral-900 font-mono">{ci.weightKg} kg</strong>
+                {checkIns.length > 0 ? (
+                  checkIns.map((ci) => (
+                    <div key={ci.id} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-0.5 rounded-md bg-neutral-100 text-neutral-800 text-xs font-bold font-mono">
+                          Week #{ci.weekNumber}
+                        </span>
+                        <span className="text-xs text-neutral-500 font-mono">{ci.submissionDate}</span>
                       </div>
-                      <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-200">
-                        <span className="text-[10px] text-neutral-500 block">Adherence</span>
-                        <strong className="text-red-600 font-mono">{ci.adherenceRating}/10</strong>
-                      </div>
-                      <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-200">
-                        <span className="text-[10px] text-neutral-500 block">Waist</span>
-                        <strong className="text-neutral-900 font-mono">{ci.waistMeasurementCm || '--'} cm</strong>
-                      </div>
-                    </div>
 
-                    <p className="text-xs text-neutral-600 italic">
-                      &ldquo;{ci.winsAndStruggles}&rdquo;
-                    </p>
-
-                    {ci.coachFeedback ? (
-                      <div className="mt-3 p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs space-y-1">
-                        <div className="flex items-center gap-1.5 font-bold text-red-600 uppercase tracking-wider text-[10px]">
-                          <Award className="w-3.5 h-3.5" /> Coach Marcus Response:
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-200">
+                          <span className="text-[10px] text-neutral-500 block">Weight</span>
+                          <strong className="text-neutral-900 font-mono">{ci.weightKg} kg</strong>
                         </div>
-                        <p className="text-neutral-800 leading-relaxed">{ci.coachFeedback}</p>
+                        <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-200">
+                          <span className="text-[10px] text-neutral-500 block">Adherence</span>
+                          <strong className="text-red-600 font-mono">{ci.adherenceRating}/10</strong>
+                        </div>
+                        <div className="bg-neutral-50 p-2 rounded-lg border border-neutral-200">
+                          <span className="text-[10px] text-neutral-500 block">Waist</span>
+                          <strong className="text-neutral-900 font-mono">{ci.waistMeasurementCm || '--'} cm</strong>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="text-[11px] text-neutral-500 font-medium flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-amber-500" /> Pending Coach Review
-                      </div>
-                    )}
+
+                      <p className="text-xs text-neutral-600 italic">
+                        &ldquo;{ci.winsAndStruggles}&rdquo;
+                      </p>
+
+                      {ci.coachFeedback ? (
+                        <div className="mt-3 p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs space-y-1">
+                          <div className="flex items-center gap-1.5 font-bold text-red-600 uppercase tracking-wider text-[10px]">
+                            <Award className="w-3.5 h-3.5" /> Coach {assignedCoach.name} Response:
+                          </div>
+                          <p className="text-neutral-800 leading-relaxed">{ci.coachFeedback}</p>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-neutral-500 font-medium flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-500" /> Pending Coach Review
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-white border border-neutral-200 rounded-2xl p-8 text-center shadow-xs">
+                    <Activity className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+                    <h4 className="text-sm font-bold text-neutral-900 uppercase font-display">No Check-In History Yet</h4>
+                    <p className="text-xs text-neutral-500 mt-1 max-w-xs mx-auto">
+                      Submit your first weekly check-in using the form on the left. Your coach will review your progress and deliver feedback here.
+                    </p>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>
@@ -920,15 +1675,15 @@ export const ClientDashboard: React.FC = () => {
               <div className="flex items-center gap-3">
                 <div className="relative w-10 h-10 rounded-xl overflow-hidden border border-neutral-200">
                   <img
-                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80"
-                    alt="Coach Marcus"
+                    src={assignedCoach.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80"}
+                    alt={assignedCoach.name}
                     className="w-full h-full object-cover"
                   />
                   <span className="absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-neutral-900 uppercase font-display">Coach Marcus Vance</h3>
-                  <p className="text-[11px] text-neutral-500">Coach &bull; Online (Response &lt; 4h)</p>
+                  <h3 className="text-sm font-bold text-neutral-900 uppercase font-display">Coach {assignedCoach.name}</h3>
+                  <p className="text-[11px] text-neutral-500">{assignedCoach.specialty || 'Lead Coach'} &bull; Online</p>
                 </div>
               </div>
               <div className="px-3 py-1 rounded-full bg-red-50 border border-red-200 text-[10px] font-bold text-red-600 uppercase tracking-wider">
@@ -938,29 +1693,41 @@ export const ClientDashboard: React.FC = () => {
 
             {/* Messages Scroll Area */}
             <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-white">
-              {messages.map((msg) => {
-                const isMe = msg.senderRole === 'client';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-bold text-neutral-500">{msg.senderName}</span>
-                      <span className="text-[10px] text-neutral-400">{msg.timestamp}</span>
-                    </div>
+              {messages.length > 0 ? (
+                messages.map((msg) => {
+                  const isMe = msg.senderRole === 'client';
+                  return (
                     <div
-                      className={`max-w-md px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
-                        isMe
-                          ? 'bg-red-600 text-white rounded-br-none shadow-sm'
-                          : 'bg-neutral-100 text-neutral-800 rounded-bl-none border border-neutral-200'
-                      }`}
+                      key={msg.id}
+                      className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                     >
-                      {msg.text}
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-neutral-500">{msg.senderName}</span>
+                        <span className="text-[10px] text-neutral-400">{msg.timestamp}</span>
+                      </div>
+                      <div
+                        className={`max-w-md px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+                          isMe
+                            ? 'bg-red-600 text-white rounded-br-none shadow-sm'
+                            : 'bg-neutral-100 text-neutral-800 rounded-bl-none border border-neutral-200'
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
                     </div>
+                  );
+                })
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 text-neutral-400">
+                  <div className="w-14 h-14 rounded-2xl bg-neutral-100 text-neutral-400 flex items-center justify-center mb-3">
+                    <MessageSquare className="w-7 h-7 text-neutral-400" />
                   </div>
-                );
-              })}
+                  <h4 className="text-sm font-bold text-neutral-800 uppercase font-display">Direct Coach Channel</h4>
+                  <p className="text-xs text-neutral-500 max-w-sm mt-1">
+                    Send a direct message to Coach {assignedCoach.name}. You can ask about technique adjustments, meal swaps, or schedule changes anytime.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Input Bar */}
@@ -987,6 +1754,8 @@ export const ClientDashboard: React.FC = () => {
         {activeTab === 'progress' && (
           <ProgressAnalyticsView clientId={user?.uid} />
         )}
+          </>
+        )}
       </main>
 
       {/* Floating Rest Timer for quick access while working out */}
@@ -998,6 +1767,7 @@ export const ClientDashboard: React.FC = () => {
       <ClientProfileModal
         isOpen={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
+        onOpenRenewal={() => setShowRenewalPayment(true)}
       />
 
       {/* Workout Completion Modal */}
@@ -1012,7 +1782,7 @@ export const ClientDashboard: React.FC = () => {
               Session Concluded!
             </h3>
             <p className="text-xs text-neutral-500">
-              Great job Alex! You completed {completedSets} working sets on {assignedWorkout.title}.
+              Great job {clientDisplayName.split(' ')[0]}! You completed {completedSets} working sets on {assignedWorkout.title}.
             </p>
 
             <div className="text-left space-y-3 pt-2">
@@ -1062,6 +1832,28 @@ export const ClientDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Renewal Payment Gate Modal */}
+      <RenewalPaymentModal
+        isOpen={showRenewalPayment}
+        onClose={() => setShowRenewalPayment(false)}
+        plan={coachingPlans.find(p => p.id === selectedRenewalPlanId) || coachingPlans[0] || {
+          id: selectedRenewalPlanId,
+          name: 'Coaching Package',
+          price: 350,
+          period: '/ month',
+          tagline: 'Full coaching program',
+          features: [],
+          category: 'online',
+          idealFor: 'All athletes'
+        }}
+        clientName={clientDisplayName}
+        clientEmail={user?.email || ''}
+        onPaymentSuccess={async () => {
+          await handleRequestRenewal();
+          setShowRenewalPayment(false);
+        }}
+      />
     </div>
   );
 };

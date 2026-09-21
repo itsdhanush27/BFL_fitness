@@ -10,10 +10,12 @@ import {
   X, 
   Trash2, 
   ArrowRightLeft,
-  Briefcase
+  Briefcase,
+  CloudUpload
 } from 'lucide-react';
 import { useFitnessData } from '../../context/FitnessDataContext';
 import { CoachMember } from '../../types';
+import { seedFoundersAndCoachesToFirestore } from '../../services/firestoreService';
 
 export const CoachTeamManagement: React.FC = () => {
   const { coaches, addCoach, updateCoach, deleteCoach, clients, assignCoachToClient } = useFitnessData();
@@ -75,8 +77,32 @@ export const CoachTeamManagement: React.FC = () => {
     }, 1200);
   };
 
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+
+  const handleSyncToFirestore = async () => {
+    setSyncLoading(true);
+    setSyncSuccess(null);
+    try {
+      await seedFoundersAndCoachesToFirestore();
+      setSyncSuccess('Staff & Founders Synced to Cloud Firestore!');
+    } catch (err: any) {
+      setSyncSuccess(`Sync note: ${err.message || 'Make sure Firestore rules are published'}`);
+    } finally {
+      setSyncLoading(false);
+      setTimeout(() => setSyncSuccess(null), 3500);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {syncSuccess && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2 shadow-xs">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{syncSuccess}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-neutral-200 p-5 rounded-2xl shadow-sm">
         <div>
@@ -93,7 +119,17 @@ export const CoachTeamManagement: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            disabled={syncLoading}
+            onClick={handleSyncToFirestore}
+            className="px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+            title="Push Founders and Coaching Staff to Cloud Firestore"
+          >
+            <CloudUpload className="w-4 h-4 text-red-500" />
+            <span>{syncLoading ? 'Syncing...' : 'Sync to Firestore'}</span>
+          </button>
           <button
             id="reassign-client-btn"
             onClick={() => setShowReassignModal(true)}

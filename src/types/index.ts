@@ -5,7 +5,7 @@ export interface ClientRosterItem {
   name: string;
   email: string;
   avatarUrl: string;
-  status: 'active' | 'pending' | 'paused';
+  status: 'active' | 'pending' | 'paused' | 'expired';
   planName: string;
   adherenceRate: number;
   joinedDate: string;
@@ -18,6 +18,18 @@ export interface ClientRosterItem {
   availableEquipment?: string[];
   assignedCoachId?: string;
   coachId?: string;
+  intakeStatus?: 'pending_review' | 'program_created' | 'reviewed' | 'active';
+  planExpiresAt?: string;
+  packageStartedAt?: string;
+  packageDurationDays?: number;
+  subscriptionStatus?: 'active' | 'expired' | 'pending_approval';
+  renewalRequestedPlanId?: string;
+  renewalRequestedPlanName?: string;
+  renewalRequestedPlanPrice?: number;
+  renewalRequestedAt?: string;
+  activePlanId?: string;
+  activePlanName?: string;
+  activePlanPrice?: number;
 }
 
 export interface UserProfile {
@@ -31,7 +43,20 @@ export interface UserProfile {
   assignedCoachId?: string;
   coachId?: string;
   activePlanId?: string;
+  activePlanName?: string;
+  activePlanPrice?: number;
+  approvalStatus?: 'pending' | 'approved';
+  status?: 'active' | 'pending' | 'paused' | 'expired';
   hasCompletedIntake?: boolean;
+  intakeStatus?: 'pending_review' | 'program_created' | 'reviewed' | 'active';
+  planExpiresAt?: string;
+  packageStartedAt?: string;
+  packageDurationDays?: number;
+  subscriptionStatus?: 'active' | 'expired' | 'pending_approval';
+  renewalRequestedPlanId?: string;
+  renewalRequestedPlanName?: string;
+  renewalRequestedPlanPrice?: number;
+  renewalRequestedAt?: string;
 }
 
 export interface CoachingPlan {
@@ -39,7 +64,9 @@ export interface CoachingPlan {
   name: string;
   tagline: string;
   price: number;
-  period: string; // e.g. "/ month" or "12-week commitment"
+  period: string; // e.g. "/ hour", "/ week", "/ month"
+  category?: 'online' | 'face_to_face' | 'boxing' | 'powerlifting';
+  billingCycle?: 'hourly' | 'weekly' | 'monthly';
   popular?: boolean;
   features: string[];
   idealFor: string;
@@ -86,7 +113,11 @@ export interface IntakeFormData {
   excludedFoods: string;
   mealsPerDay: number;
   supplementHistory: string;
-  status: 'pending_review' | 'program_created';
+  selectedPlanId?: string;
+  selectedPlanName?: string;
+  selectedPlanPrice?: number;
+  approvalStatus?: 'pending' | 'approved';
+  status: 'pending_review' | 'program_created' | 'reviewed' | 'active';
 }
 
 export interface Exercise {
@@ -290,6 +321,12 @@ export interface InAppNotification {
   timestamp: string;
   read: boolean;
   actionTab?: 'workout' | 'nutrition' | 'checkin' | 'chat' | 'progress' | 'profile' | 'clients';
+  /** Name of the person who triggered this notification */
+  actorName?: string;
+  /** Role of the actor: 'coach', 'client', 'admin', 'system' */
+  actorRole?: string;
+  /** Detailed summary of what changed (e.g. "2400 kcal · 180P · 220C · 60F") */
+  changeDetail?: string;
 }
 
 export interface CoachMember {
