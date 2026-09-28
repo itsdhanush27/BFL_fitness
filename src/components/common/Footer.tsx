@@ -12,12 +12,21 @@ export const Footer: React.FC<{ onNavigate: (view: 'marketing' | 'client_portal'
           {/* Col 1: Brand */}
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center shadow-md shadow-red-200 border border-red-400/30">
-                <Dumbbell className="w-5 h-5 text-white" />
+              <div className="relative w-12 h-12 rounded-xl bg-neutral-950 flex items-center justify-center shadow-md shadow-neutral-900/20 border border-neutral-800 p-1.5 overflow-hidden shrink-0">
+                <img 
+                  src="/assets/bfl-emblem-transparent.png" 
+                  alt="BFL Fitness Logo" 
+                  className="w-full h-full object-contain filter drop-shadow-[0_2px_6px_rgba(220,38,38,0.35)]" 
+                />
               </div>
-              <span className="font-extrabold text-2xl tracking-tighter text-neutral-900 font-display">
-                BFL <span className="text-red-600">FITNESS</span>
-              </span>
+              <div>
+                <span className="font-extrabold text-2xl tracking-tighter font-display block leading-none">
+                  <span className="text-red-600">BFL</span> <span className="text-neutral-900">FITNESS</span>
+                </span>
+                <span className="text-[10px] tracking-widest text-neutral-500 uppercase font-bold">
+                  Brothers For Life &bull; Stronger Together
+                </span>
+              </div>
             </div>
             <p className="text-sm leading-relaxed text-neutral-600">
               {cmsContent.footerDescription || 'Science-rooted online fitness coaching, bespoke hypertrophy programming, and precision metabolic nutrition designed for permanent physical transformation.'}

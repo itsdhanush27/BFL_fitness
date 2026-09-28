@@ -1105,6 +1105,16 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-1 bg-gradient-to-r from-transparent via-red-600 to-transparent" />
             
             <div className="max-w-3xl mx-auto space-y-6">
+              <div className="flex justify-center">
+                <div className="w-16 h-16 rounded-2xl bg-neutral-950 border border-neutral-800 p-2 shadow-2xl shadow-red-950/40">
+                  <img 
+                    src="/assets/bfl-emblem-transparent.png" 
+                    alt="BFL Fitness Emblem" 
+                    className="w-full h-full object-contain filter drop-shadow-[0_2px_8px_rgba(220,38,38,0.5)]" 
+                  />
+                </div>
+              </div>
+
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold uppercase tracking-wider">
                 <Sparkles className="w-3.5 h-3.5 text-red-500" />
                 <span>{cmsContent.founderApplicationsNotice || 'Limited Coaching Roster • Applications Open'}</span>

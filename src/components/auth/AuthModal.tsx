@@ -217,8 +217,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Modal Header */}
         <div className="text-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center mx-auto mb-3 shadow-md shadow-red-200 border border-red-500/30">
-            {mode === 'verify_email' ? <Mail className="w-6 h-6 text-white" /> : <Dumbbell className="w-6 h-6 text-white" />}
+          <div className="w-14 h-14 rounded-2xl bg-neutral-950 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-neutral-950/20 border border-neutral-800 p-1.5 overflow-hidden">
+            {mode === 'verify_email' ? (
+              <div className="w-full h-full rounded-xl bg-red-600 flex items-center justify-center">
+                <Mail className="w-6 h-6 text-white" />
+              </div>
+            ) : (
+              <img 
+                src="/assets/bfl-emblem-transparent.png" 
+                alt="BFL Fitness Emblem" 
+                className="w-full h-full object-contain filter drop-shadow-[0_2px_6px_rgba(220,38,38,0.4)]" 
+              />
+            )}
           </div>
 
           {mode === 'signup' && (
