@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { auth } from './services/firebase';
 import { FitnessDataProvider } from './context/FitnessDataContext';
 import { Navbar } from './components/common/Navbar';
 import { Footer } from './components/common/Footer';
@@ -54,11 +55,16 @@ const MainContent: React.FC = () => {
   } | null>(null);
 
   // Route Protection: Enforce auth guards for client, coach, and admin dashboards
+  // NOTE: We check `auth.currentUser` as a fallback when the React `user` state
+  // hasn't propagated yet (e.g. immediately after login closes the AuthModal and
+  // sets currentView). Without this, the guard would bounce the user back to
+  // marketing on the very first render tick after login.
   useEffect(() => {
     const activeRole = currentUser?.role || user?.role;
+    const isAuthenticated = !!user || !!auth.currentUser;
 
     if (currentView === 'coach_portal') {
-      if (!user) {
+      if (!isAuthenticated) {
         setCurrentView('marketing');
         setAuthModalOpen(false);
       } else if (activeRole === 'client') {
@@ -66,7 +72,7 @@ const MainContent: React.FC = () => {
         setCurrentView('client_portal');
       }
     } else if (currentView === 'admin_manage_coaches') {
-      if (!user) {
+      if (!isAuthenticated) {
         setCurrentView('marketing');
         setAuthModalOpen(false);
       } else if (activeRole === 'coach') {
@@ -76,14 +82,14 @@ const MainContent: React.FC = () => {
         setCurrentView('client_portal');
       }
     } else if (currentView === 'client_portal') {
-      if (!user) {
+      if (!isAuthenticated) {
         setCurrentView('marketing');
         setAuthModalOpen(false);
       }
     }
   }, [currentView, user, currentUser]);
 
-  // Handle clean sign-out routing: signs the user out and returns to the auth screen
+  // Handle clean sign-out routing: signs the user out and returns to the marketing page
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -92,8 +98,6 @@ const MainContent: React.FC = () => {
     }
     setCurrentView('marketing');
     navigate('/');
-    setAuthModalMode('login');
-    setAuthModalOpen(true);
   };
 
   const handleOpenAuth = (mode: 'login' | 'signup' = 'login') => {

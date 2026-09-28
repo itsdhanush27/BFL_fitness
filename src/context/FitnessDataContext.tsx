@@ -190,14 +190,57 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return INITIAL_COACHING_PLANS;
   });
 
+  const sanitizeExerciseVideoUrl = (exerciseId?: string, currentUrl?: string): string => {
+    if (!currentUrl || currentUrl.includes('images.unsplash.com') || currentUrl === 'https://youtube.com') {
+      const matched = INITIAL_EXERCISES.find(e => e.id === exerciseId);
+      return matched?.videoUrl || '/assets/founders/videos/mass-training-1.mp4';
+    }
+    return currentUrl;
+  };
+
+  const sanitizeWorkoutExercises = (workout: AssignedWorkout | null): AssignedWorkout | null => {
+    if (!workout || !workout.exercises) return workout;
+    return {
+      ...workout,
+      exercises: workout.exercises.map(ex => ({
+        ...ex,
+        videoUrl: sanitizeExerciseVideoUrl(ex.exerciseId, ex.videoUrl)
+      }))
+    };
+  };
+
   const [exercises, setExercises] = useState<Exercise[]>(() => {
     const saved = localStorage.getItem('bfl_exercises');
-    return saved ? JSON.parse(saved) : INITIAL_EXERCISES;
+    if (saved) {
+      try {
+        const parsed: Exercise[] = JSON.parse(saved);
+        return parsed.map(ex => ({
+          ...ex,
+          videoUrl: sanitizeExerciseVideoUrl(ex.id, ex.videoUrl)
+        }));
+      } catch (e) {}
+    }
+    return INITIAL_EXERCISES;
   });
 
   const [templates, setTemplates] = useState<WorkoutTemplate[]>(() => {
     const saved = localStorage.getItem('bfl_templates');
-    return saved ? JSON.parse(saved) : INITIAL_TEMPLATES;
+    if (saved) {
+      try {
+        const parsed: WorkoutTemplate[] = JSON.parse(saved);
+        return parsed.map(t => ({
+          ...t,
+          workouts: (t.workouts || []).map(w => ({
+            ...w,
+            exercises: (w.exercises || []).map(ex => ({
+              ...ex,
+              videoUrl: sanitizeExerciseVideoUrl(ex.exerciseId, ex.videoUrl)
+            }))
+          }))
+        }));
+      } catch (e) {}
+    }
+    return INITIAL_TEMPLATES;
   });
 
   const [assignedWorkout, setAssignedWorkout] = useState<AssignedWorkout | null>(() => {
@@ -206,7 +249,9 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed?.clientId === user.uid && (parsed.exercises?.length || 0) > 0) return parsed;
+          if (parsed?.clientId === user.uid && (parsed.exercises?.length || 0) > 0) {
+            return sanitizeWorkoutExercises(parsed);
+          }
         } catch (e) {}
       }
       return null;
@@ -216,12 +261,12 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       try {
         const parsed = JSON.parse(saved);
         if (parsed?.clientId && !parsed.clientId.startsWith('client_alex') && (parsed.exercises?.length || 0) > 0) {
-          if (isRealClient && parsed.clientId === user?.uid) return parsed;
-          if (!isRealClient) return parsed;
+          if (isRealClient && parsed.clientId === user?.uid) return sanitizeWorkoutExercises(parsed);
+          if (!isRealClient) return sanitizeWorkoutExercises(parsed);
         }
       } catch (e) {}
     }
-    return null;
+    return sanitizeWorkoutExercises(INITIAL_ASSIGNED_WORKOUT);
   });
 
   const [nutritionPlan, setNutritionPlan] = useState<NutritionPlan | null>(() => {
@@ -230,7 +275,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed?.clientId === user.uid) return parsed;
+          if (parsed?.clientId === user.uid && parsed.isPrescribed) return parsed;
         } catch (e) {}
       }
       return null;
@@ -239,7 +284,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed?.clientId && !parsed.clientId.startsWith('client_alex')) {
+        if (parsed?.clientId && !parsed.clientId.startsWith('client_alex') && parsed.isPrescribed) {
           if (isRealClient && parsed.clientId === user?.uid) return parsed;
           if (!isRealClient) return parsed;
         }
@@ -387,7 +432,18 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const [clientIntake, setClientIntake] = useState<IntakeFormData | null>(() => {
     const saved = localStorage.getItem('bfl_client_intake');
-    return saved ? JSON.parse(saved) : null;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (isRealClient && user?.email && parsed.clientEmail) {
+          if (parsed.clientEmail.toLowerCase().trim() !== user.email.toLowerCase().trim()) {
+            return null; // Isolate from different client's cached intake
+          }
+        }
+        return parsed;
+      } catch (e) {}
+    }
+    return null;
   });
 
   // Purge legacy mock data stored in localStorage from earlier seeds
@@ -416,16 +472,29 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   // ─── Firestore Real-Time Subscriptions ───────────────────────────────
-  // Subscribe to Firestore CLIENTS (coach / admin view)
+  // Subscribe to Firestore CLIENTS (coach / admin view, and client self-profile sync)
   useEffect(() => {
-    if (!isAdmin || !user) return;
-    // Admins see all clients; coaches see only their assigned ones
-    const coachFilter = user.role === 'admin' ? null : (user.uid || user.id);
+    if (!user) return;
+    const coachFilter = isAdmin ? (user.role === 'admin' ? null : (user.uid || (user as any).id)) : null;
     const unsub = fsSubscribeToClients(coachFilter, (firestoreClients) => {
-      setClients(firestoreClients);
+      if (isAdmin) {
+        setClients(firestoreClients);
+      } else {
+        const userEmail = user.email?.toLowerCase().trim();
+        const userName = (user.displayName || (user as any).name || '').toLowerCase().trim();
+        const myClients = firestoreClients.filter(c => 
+          c.id === user.uid || 
+          c.id === (user as any).id ||
+          (userEmail && c.email && c.email.toLowerCase().trim() === userEmail) ||
+          (userName && c.name && c.name.toLowerCase().trim() === userName)
+        );
+        if (myClients.length > 0) {
+          setClients(myClients);
+        }
+      }
     });
     return () => unsub();
-  }, [isAdmin, user?.uid, user?.id, user?.role]);
+  }, [isAdmin, user?.uid, (user as any)?.id, user?.role, user?.email, user?.displayName]);
 
   // Seed Founders & default coaches to Firestore, and subscribe to Firestore COACHES
   useEffect(() => {
@@ -450,25 +519,53 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => unsub();
   }, [user?.uid, user?.role]);
 
-  // Subscribe to Firestore INTAKES (coach / admin view)
+  // Subscribe to Firestore INTAKES (real-time sync for admin, coaches, and clients)
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!user) return;
     const unsub = fsSubscribeToIntakes(null, (firestoreIntakes) => {
-      setIntakeForms(firestoreIntakes);
-    });
-    return () => unsub();
-  }, [isAdmin]);
-
-  // Subscribe to Firestore INTAKE for the current client
-  useEffect(() => {
-    if (!user?.uid || isAdmin) return;
-    const unsub = fsSubscribeToIntakes(user.uid, (firestoreIntakes) => {
-      if (firestoreIntakes.length > 0) {
-        setClientIntake(firestoreIntakes[0]);
+      if (isAdmin) {
+        setIntakeForms(firestoreIntakes);
+      } else {
+        const userEmail = user.email?.toLowerCase().trim();
+        const userName = (user.displayName || (user as any).name || '').toLowerCase().trim();
+        const myIntakes = firestoreIntakes.filter(i => 
+          (i.clientId && (i.clientId === user.uid || i.clientId === (user as any).id)) ||
+          (userEmail && i.clientEmail && i.clientEmail.toLowerCase().trim() === userEmail) ||
+          (userName && i.clientName && i.clientName.toLowerCase().trim() === userName)
+        );
+        setIntakeForms(myIntakes);
+        if (myIntakes.length > 0) {
+          setClientIntake(myIntakes[0]);
+          try {
+            localStorage.setItem('bfl_client_intake', JSON.stringify(myIntakes[0]));
+          } catch {}
+        }
       }
     });
     return () => unsub();
-  }, [user?.uid, isAdmin]);
+  }, [isAdmin, user?.uid, (user as any)?.id, user?.email, user?.displayName]);
+
+  // Sanitize cached clientIntake to guarantee no cross-account data leak (e.g. Madhan on Dhanush's account)
+  useEffect(() => {
+    if (!user || isAdmin) return;
+    const userEmail = user.email?.toLowerCase().trim();
+    const userName = (user.displayName || (user as any).name || '').toLowerCase().trim();
+    if (clientIntake) {
+      const emailMatches = userEmail && clientIntake.clientEmail && clientIntake.clientEmail.toLowerCase().trim() === userEmail;
+      const idMatches = clientIntake.clientId && (clientIntake.clientId === user.uid || clientIntake.clientId === (user as any).id);
+      const nameMatches = userName && clientIntake.clientName && clientIntake.clientName.toLowerCase().trim() === userName;
+      const nameConflicts = userName && clientIntake.clientName && 
+        clientIntake.clientName.toLowerCase().trim() !== userName &&
+        userName !== 'valued athlete' && userName !== 'athlete';
+
+      if (nameConflicts || (!emailMatches && !idMatches && !nameMatches)) {
+        setClientIntake(null);
+        try {
+          localStorage.removeItem('bfl_client_intake');
+        } catch {}
+      }
+    }
+  }, [user, isAdmin, clientIntake]);
 
   // Real-time subscriptions for real client: WORKOUT, NUTRITION, CHECKINS, MESSAGES
   useEffect(() => {
@@ -899,82 +996,139 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     clientId?: string,
     newStatus: 'pending_review' | 'program_created' | 'reviewed' | 'active' = 'reviewed'
   ): Promise<void> => {
+    // Find target intake to resolve both clientId and email
+    const targetIntake = effectiveIntakes.find(i => i.id === intakeId || (clientId && i.clientId === clientId));
+    const effectiveClientId = clientId || targetIntake?.clientId;
+    const targetEmail = targetIntake?.clientEmail?.trim().toLowerCase();
+
     // 1. Optimistically update local intakeForms state
     setIntakeForms(prev => {
       let matched = false;
       const updated = prev.map(item => {
-        if (item.id === intakeId || (clientId && item.clientId === clientId)) {
+        if (
+          item.id === intakeId ||
+          (effectiveClientId && item.clientId === effectiveClientId) ||
+          (targetEmail && item.clientEmail?.trim().toLowerCase() === targetEmail)
+        ) {
           matched = true;
-          return { ...item, status: newStatus };
+          return { 
+            ...item, 
+            status: newStatus,
+            approvalStatus: newStatus === 'active' ? 'approved' : (item as any).approvalStatus 
+          };
         }
         return item;
       });
-      if (!matched && (intakeId || clientId)) {
-        const targetClient = clients.find(c => c.id === clientId);
+      if (!matched && (intakeId || effectiveClientId || targetEmail)) {
+        const targetClient = clients.find(c => 
+          (effectiveClientId && c.id === effectiveClientId) || 
+          (targetEmail && c.email?.trim().toLowerCase() === targetEmail)
+        );
         return [
           ...updated,
           {
             id: intakeId,
-            clientId: clientId || '',
-            clientName: targetClient?.name || 'Athlete',
-            clientEmail: targetClient?.email || '',
-            age: 28,
-            gender: 'Not specified',
-            heightCm: 178,
-            currentWeightKg: targetClient?.currentWeightKg || 80,
-            targetWeightKg: targetClient?.targetWeightKg || 75,
-            primaryGoal: (targetClient?.primaryGoal as any) || 'hypertrophy',
-            baselineMeasurements: {
+            clientId: effectiveClientId || '',
+            clientName: targetClient?.name || targetIntake?.clientName || 'Athlete',
+            clientEmail: targetEmail || targetClient?.email || '',
+            age: targetIntake?.age || 28,
+            gender: targetIntake?.gender || 'Not specified',
+            heightCm: targetIntake?.heightCm || 178,
+            currentWeightKg: targetClient?.currentWeightKg || targetIntake?.currentWeightKg || 80,
+            targetWeightKg: targetClient?.targetWeightKg || targetIntake?.targetWeightKg || 75,
+            primaryGoal: (targetClient?.primaryGoal as any) || targetIntake?.primaryGoal || 'hypertrophy',
+            baselineMeasurements: targetIntake?.baselineMeasurements || {
               waistCm: (targetClient as any)?.waistCm || 82,
               chestCm: (targetClient as any)?.chestCm || 102
             },
-            injuryHistory: targetClient?.injuryNotes || 'None reported',
-            medicalNotes: '',
+            injuryHistory: targetClient?.injuryNotes || targetIntake?.injuryHistory || 'None reported',
+            medicalNotes: targetIntake?.medicalNotes || '',
             hasMedicalClearance: true,
-            trainingDaysPerWeek: targetClient?.daysPerWeek || 4,
-            trainingLocation: 'commercial_gym',
-            availableEquipment: targetClient?.availableEquipment || [],
-            workoutDurationMinutes: 60,
-            dietaryPreference: 'flexible_dieting',
-            foodAllergies: '',
-            excludedFoods: '',
+            trainingDaysPerWeek: targetClient?.daysPerWeek || targetIntake?.trainingDaysPerWeek || 4,
+            trainingLocation: targetIntake?.trainingLocation || 'commercial_gym',
+            availableEquipment: targetClient?.availableEquipment || targetIntake?.availableEquipment || [],
+            workoutDurationMinutes: targetIntake?.workoutDurationMinutes || 60,
+            dietaryPreference: targetIntake?.dietaryPreference || 'flexible_dieting',
+            foodAllergies: targetIntake?.foodAllergies || '',
+            excludedFoods: targetIntake?.excludedFoods || '',
             mealsPerDay: 4,
-            supplementHistory: '',
+            supplementHistory: targetIntake?.supplementHistory || '',
             status: newStatus,
-            submittedAt: new Date().toISOString()
+            submittedAt: targetIntake?.submittedAt || new Date().toISOString()
           }
         ];
       }
       return updated;
     });
 
-    // 2. Optimistically update clients state if clientId provided
-    if (clientId) {
-      setClients(prev =>
-        prev.map(c => {
-          if (c.id === clientId) {
-            return {
-              ...c,
-              status: 'active',
-              intakeStatus: newStatus
-            } as ClientRosterItem;
-          }
-          return c;
-        })
-      );
-    }
+    // 2. Optimistically update clients state (match by id OR email)
+    setClients(prev =>
+      prev.map(c => {
+        const isMatch = 
+          (effectiveClientId && c.id === effectiveClientId) ||
+          (targetEmail && c.email?.trim().toLowerCase() === targetEmail);
 
-    // 3. Update clientIntake if matching
+        if (isMatch) {
+          const isNowActive = newStatus === 'active';
+          return {
+            ...c,
+            status: isNowActive ? 'active' : c.status,
+            approvalStatus: isNowActive ? 'approved' : (c as any).approvalStatus,
+            subscriptionStatus: isNowActive ? 'active' : c.subscriptionStatus,
+            intakeStatus: newStatus
+          } as ClientRosterItem;
+        }
+        return c;
+      })
+    );
+
+    // 3. Update clientIntake state and localStorage
     setClientIntake(prev => {
-      if (prev && (prev.id === intakeId || (clientId && prev.clientId === clientId))) {
-        return { ...prev, status: newStatus };
+      const isMatch = 
+        !prev ||
+        prev.id === intakeId ||
+        (effectiveClientId && prev.clientId === effectiveClientId) ||
+        (targetEmail && prev.clientEmail?.trim().toLowerCase() === targetEmail);
+
+      if (isMatch && prev) {
+        const updated = { 
+          ...prev, 
+          status: newStatus,
+          approvalStatus: newStatus === 'active' ? 'approved' : (prev as any).approvalStatus 
+        };
+        try {
+          localStorage.setItem('bfl_client_intake', JSON.stringify(updated));
+        } catch {}
+        return updated;
       }
       return prev;
     });
 
-    // 4. Persist mutation to Firestore
+    // 4. Update auth user in localStorage if active
+    if (newStatus === 'active') {
+      try {
+        const savedAuth = localStorage.getItem('bfl_auth_user');
+        if (savedAuth) {
+          const parsed = JSON.parse(savedAuth);
+          if (
+            (effectiveClientId && (parsed.uid === effectiveClientId || parsed.id === effectiveClientId)) ||
+            (targetEmail && parsed.email?.trim().toLowerCase() === targetEmail)
+          ) {
+            localStorage.setItem('bfl_auth_user', JSON.stringify({
+              ...parsed,
+              status: 'active',
+              approvalStatus: 'approved',
+              subscriptionStatus: 'active',
+              intakeStatus: 'active'
+            }));
+          }
+        }
+      } catch {}
+    }
+
+    // 5. Persist mutation to Firestore
     try {
-      await updateIntakeStatusInFirestore(intakeId, clientId, newStatus);
+      await updateIntakeStatusInFirestore(intakeId, effectiveClientId, newStatus);
     } catch (err) {
       console.warn('[FitnessData] updateIntakeStatusInFirestore error:', err);
     }
@@ -1485,7 +1639,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Bodyweight / Jump Rope',
             coachNotes: 'Work head movement off the centerline while maintaining defensive guard. 3-minute rounds.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training.mp4',
             restSeconds: 60,
             sets: [
               { setNumber: 1, targetReps: '3 min round', actualWeightKg: 0, actualReps: 1, actualRpe: 7, completed: false },
@@ -1500,7 +1654,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Heavy Bag & Gloves',
             coachNotes: 'Turn hip over completely on the hook. Exhale sharply on impact. 10 punch flurries to finish each set.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '12 combos', actualWeightKg: 0, actualReps: 12, actualRpe: 8, completed: false },
@@ -1516,7 +1670,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Slip Bag or Coach Mitts',
             coachNotes: 'Keep eyes level on your target. Counter immediately following head movement.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training.mp4',
             restSeconds: 60,
             sets: [
               { setNumber: 1, targetReps: '15 reps', actualWeightKg: 0, actualReps: 15, actualRpe: 8, completed: false },
@@ -1531,7 +1685,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Jump Rope / Mat',
             coachNotes: 'Maximum sustained effort. Empty the tank on final round.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
             restSeconds: 45,
             sets: [
               { setNumber: 1, targetReps: '60 sec', actualWeightKg: 0, actualReps: 1, actualRpe: 9, completed: false },
@@ -1567,7 +1721,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Barbell & Squat Rack',
             coachNotes: 'Descend to competition depth below parallel. Solid 1-second pause at the bottom without losing spinal brace.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-2.mp4',
             restSeconds: 180,
             sets: [
               { setNumber: 1, targetReps: '5', actualWeightKg: 100, actualReps: 5, actualRpe: 7.5, completed: false },
@@ -1584,7 +1738,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Barbell & Competition Bench',
             coachNotes: 'Drive through lats and legs. Pause motionless on chest before initiating lockout.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-1.mp4',
             restSeconds: 150,
             sets: [
               { setNumber: 1, targetReps: '5', actualWeightKg: 80, actualReps: 5, actualRpe: 7.5, completed: false },
@@ -1600,7 +1754,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Barbell & Platform',
             coachNotes: 'Reinforce leg drive off the floor. Do not round upper thoracic spine.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
             restSeconds: 180,
             sets: [
               { setNumber: 1, targetReps: '4', actualWeightKg: 120, actualReps: 4, actualRpe: 8, completed: false },
@@ -1615,7 +1769,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Ab Wheel',
             coachNotes: 'Keep pelvis tucked in posterior pelvic tilt. Squeeze glutes at top.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '12', actualWeightKg: 0, actualReps: 12, actualRpe: 8, completed: false },
@@ -1651,7 +1805,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Barbell & Squat Rack',
             coachNotes: 'Coach will supervise knee tracking and pelvis position. Controlled descent.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-2.mp4',
             restSeconds: 120,
             sets: [
               { setNumber: 1, targetReps: '8-10', actualWeightKg: 70, actualReps: 10, actualRpe: 7.5, completed: false },
@@ -1667,7 +1821,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Dumbbells & Incline Bench',
             coachNotes: 'Tuck elbows 45 degrees. Squeeze upper chest at top peak contraction.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-1.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '10-12', actualWeightKg: 24, actualReps: 12, actualRpe: 8, completed: false },
@@ -1682,7 +1836,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Barbell',
             coachNotes: 'Soft bend in knees, push hips backward until deep hamstring stretch.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '10', actualWeightKg: 70, actualReps: 10, actualRpe: 8, completed: false },
@@ -1697,7 +1851,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Pull-Up Bar / Cable Pulldown',
             coachNotes: 'Initiate with scapular depression. Drive elbows straight down.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-2.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '8-10', actualWeightKg: 0, actualReps: 10, actualRpe: 8, completed: false },
@@ -1734,7 +1888,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Barbell & Bench',
             coachNotes: 'Solid arch, plant feet firmly into floor. 2-second eccentric phase.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-1.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '8-10', actualWeightKg: 60, actualReps: 10, actualRpe: 7.5, completed: false },
@@ -1749,7 +1903,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Dumbbells & Bench',
             coachNotes: 'Full range of motion, press smoothly to lockout.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-1.mp4',
             restSeconds: 75,
             sets: [
               { setNumber: 1, targetReps: '10-12', actualWeightKg: 20, actualReps: 12, actualRpe: 8, completed: false },
@@ -1764,7 +1918,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Cable Machine',
             coachNotes: 'Do not swing hips. Pull handle right below sternum and hold 1-sec squeeze.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/mass-training-2.mp4',
             restSeconds: 75,
             sets: [
               { setNumber: 1, targetReps: '10-12', actualWeightKg: 50, actualReps: 12, actualRpe: 8, completed: false },
@@ -1779,7 +1933,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             equipment: 'Dumbbells',
             coachNotes: 'Maintain upright posture, knee gently kisses the ground.',
             clientNotes: '',
-            videoUrl: 'https://youtube.com',
+            videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
             restSeconds: 90,
             sets: [
               { setNumber: 1, targetReps: '12 per leg', actualWeightKg: 14, actualReps: 12, actualRpe: 8, completed: false },
@@ -1789,20 +1943,10 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           }
         ]
       };
-      initializedNutrition = {
-        clientId,
-        calories: 2350,
-        proteinGrams: 185,
-        carbsGrams: 235,
-        fatGrams: 55,
-        waterLiters: 3.5,
-        dailyNotes: 'Full diet and exercise online protocol. Weigh in every morning fasted.'
-      };
     }
 
-    // Assign initialized routine and nutrition
+    // Assign initialized routine (nutrition must be explicitly prescribed by coach via Macro Builder)
     assignWorkoutToClient(clientId, initializedRoutine);
-    updateNutritionPlan(initializedNutrition);
 
     // Notify client in real-time
     addNotification({
@@ -1864,6 +2008,12 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (key) intakeMap.set(key, form);
     });
 
+    // 1b. If clientIntake is available in state, ensure it is represented
+    if (clientIntake) {
+      const key = clientIntake.clientId || clientIntake.id || (user?.uid ? user.uid : 'client_intake');
+      if (key) intakeMap.set(key, clientIntake);
+    }
+
     // 2. Synthesize intake submission for any clients in clients roster who have completed intake or have metric data
     (clients || []).forEach(c => {
       let found = false;
@@ -1920,7 +2070,7 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       return timeB - timeA;
     });
     return result;
-  }, [intakeForms, clients]);
+  }, [intakeForms, clientIntake, user?.uid, clients]);
 
   // Intake submissions specifically waiting for coach review (pipeline / queue)
   const pendingIntakeSubmissions = useMemo(() => {
@@ -1968,8 +2118,18 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const resolvedPlanName = existingPlan || 
         (matchingPlan ? `${matchingPlan.name} ($${matchingPlan.price}${matchingPlan.period})` : ((intake as any).selectedPlanName || 'Online Coaching ($350/mo)'));
 
+      // Check whether this client is approved & activated by a coach
+      const isIntakeApproved = Boolean(intake?.status === 'active' || (intake as any)?.approvalStatus === 'approved');
+      const isClientApproved = isIntakeApproved || Boolean(
+        existing &&
+        existing.status === 'active' &&
+        (existing as any).approvalStatus === 'approved' &&
+        existing.subscriptionStatus !== 'pending_approval' &&
+        (existing as any).intakeStatus !== 'pending_review'
+      );
+
       if (existing) {
-        rosterMap.set(existingKey, {
+        rosterMap.set(existingKey!, {
           ...existing,
           planName: resolvedPlanName,
           activePlanId: existing.activePlanId || (matchingPlan ? matchingPlan.id : (intake as any).selectedPlanId),
@@ -1978,15 +2138,20 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           assignedCoachId: existing.assignedCoachId || existing.coachId || (intake as any).assignedCoachId || (intake as any).coachId || 'admin_mass_narimanian',
           coachId: existing.coachId || existing.assignedCoachId || (intake as any).coachId || (intake as any).assignedCoachId || 'admin_mass_narimanian',
           primaryGoal: existing.primaryGoal || intake.primaryGoal,
-          startingWeightKg: existing.startingWeightKg > 0 ? existing.startingWeightKg : (intake.currentWeightKg || 0),
-          currentWeightKg: existing.currentWeightKg > 0 ? existing.currentWeightKg : (intake.currentWeightKg || 0),
-          targetWeightKg: existing.targetWeightKg > 0 ? existing.targetWeightKg : (intake.targetWeightKg || 0),
+          startingWeightKg: (intake.currentWeightKg && Number(intake.currentWeightKg) > 0) ? Number(intake.currentWeightKg) : (existing.startingWeightKg || 0),
+          currentWeightKg: (intake.currentWeightKg && Number(intake.currentWeightKg) > 0) ? Number(intake.currentWeightKg) : (existing.currentWeightKg || 0),
+          targetWeightKg: (intake.targetWeightKg && Number(intake.targetWeightKg) > 0) ? Number(intake.targetWeightKg) : (existing.targetWeightKg || 0),
+          baselineMeasurements: intake.baselineMeasurements || (existing as any)?.baselineMeasurements,
+          waistCm: intake.baselineMeasurements?.waistCm ?? (existing as any)?.waistCm,
+          chestCm: intake.baselineMeasurements?.chestCm ?? (existing as any)?.chestCm,
+          bicepsCm: intake.baselineMeasurements?.bicepsCm ?? (existing as any)?.bicepsCm,
           injuryNotes: (existing.injuryNotes && existing.injuryNotes !== 'None reported') ? existing.injuryNotes : (intake.injuryHistory || intake.medicalNotes || 'None reported'),
           daysPerWeek: existing.daysPerWeek > 0 ? existing.daysPerWeek : (intake.trainingDaysPerWeek || 4),
           availableEquipment: (existing.availableEquipment && existing.availableEquipment.length > 0) ? existing.availableEquipment : (intake.availableEquipment || []),
-          status: existing.status || 'active',
-          subscriptionStatus: existing.subscriptionStatus || 'active'
-        });
+          status: isClientApproved ? 'active' : (existing.status === 'expired' ? 'expired' : 'pending'),
+          subscriptionStatus: isClientApproved ? (existing.subscriptionStatus === 'expired' ? 'expired' : 'active') : 'pending_approval',
+          approvalStatus: isClientApproved ? 'approved' : 'pending'
+        } as any);
       } else if (intake.clientId) {
         const assignedCoachId = (intake as any).assignedCoachId || (intake as any).coachId || 'admin_mass_narimanian';
         rosterMap.set(intake.clientId, {
@@ -1994,7 +2159,9 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           name: intake.clientName,
           email: intake.clientEmail,
           avatarUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&auto=format&fit=crop&q=80',
-          status: 'active',
+          status: isClientApproved ? 'active' : 'pending',
+          subscriptionStatus: isClientApproved ? 'active' : 'pending_approval',
+          approvalStatus: isClientApproved ? 'approved' : 'pending',
           planName: resolvedPlanName,
           activePlanId: (matchingPlan ? matchingPlan.id : (intake as any).selectedPlanId),
           activePlanName: resolvedPlanName,
@@ -2005,12 +2172,16 @@ export const FitnessDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           startingWeightKg: intake.currentWeightKg,
           currentWeightKg: intake.currentWeightKg,
           targetWeightKg: intake.targetWeightKg,
+          baselineMeasurements: intake.baselineMeasurements,
+          waistCm: intake.baselineMeasurements?.waistCm,
+          chestCm: intake.baselineMeasurements?.chestCm,
+          bicepsCm: intake.baselineMeasurements?.bicepsCm,
           injuryNotes: intake.injuryHistory || 'None reported',
           daysPerWeek: intake.trainingDaysPerWeek || 4,
           availableEquipment: intake.availableEquipment || ['Barbells', 'Dumbbells'],
           assignedCoachId: assignedCoachId,
           coachId: assignedCoachId
-        });
+        } as any);
       }
     });
 

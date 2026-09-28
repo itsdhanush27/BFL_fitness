@@ -239,7 +239,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Break at hips and knees simultaneously, descending to at least parallel.',
       'Drive aggressively through the midfoot while keeping chest upright.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-2.mp4',
     difficulty: 'Advanced'
   },
   {
@@ -255,7 +255,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Lower dumbbells under control with elbows tucked at roughly 45–60 degrees.',
       'Press up and inward without banging weights at the top lockout.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-1.mp4',
     difficulty: 'Intermediate'
   },
   {
@@ -271,7 +271,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Lower barbell until a deep stretch is felt in hamstrings (mid-shin level).',
       'Contract glutes and hamstrings to return to vertical lockout.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
     difficulty: 'Intermediate'
   },
   {
@@ -287,7 +287,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Pull elbows down to your hip pockets, driving chest toward the ceiling.',
       'Control the eccentric for a 3-second full stretch at top.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-2.mp4',
     difficulty: 'Beginner'
   },
   {
@@ -303,7 +303,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Pause for a fraction of a second at shoulder height.',
       'Lower with control; avoid swinging or using torso momentum.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/pouya-training.mp4',
     difficulty: 'Beginner'
   },
   {
@@ -319,7 +319,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Descend until rear knee is hovering 1-2 inches off the floor.',
       'Drive through lead heel and midfoot to return to top.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1434608519344-49d77a699e1d?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/pouya-training-2.mp4',
     difficulty: 'Intermediate'
   },
   {
@@ -334,7 +334,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Allow shoulder blades to protract forward during eccentric for maximum lat stretch.',
       'Drive elbows backward hugging ribcage, squeezing rhomboids at contraction.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-2.mp4',
     difficulty: 'Beginner'
   },
   {
@@ -349,7 +349,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Squeeze glutes and brace core to avoid lumbar hyper-extension.',
       'Pull chin back as bar passes face, then push head through window at lockout.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1532029837206-abbe2b7620e3?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-1.mp4',
     difficulty: 'Advanced'
   },
   {
@@ -364,7 +364,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Extend forearms downward, spreading rope ends apart at the bottom.',
       'Isolate the lateral and long heads without letting elbows flare forward.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-1.mp4',
     difficulty: 'Beginner'
   },
   {
@@ -379,7 +379,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Let arms hang down into full long-head bicep stretch.',
       'Supinate wrists as you curl, keeping elbows stationary behind torso.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/mass-training-1.mp4',
     difficulty: 'Beginner'
   },
   {
@@ -394,7 +394,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Posteriorly tilt pelvis to initiate curl before raising legs.',
       'Bring toes to eye level without using swing momentum.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/pouya-training.mp4',
     difficulty: 'Intermediate'
   },
   {
@@ -409,7 +409,7 @@ export const INITIAL_EXERCISES: Exercise[] = [
       'Support neck with hands and gently extend backward over roller.',
       'Breathe deeply into ribcage and perform 8-10 slow extensions.'
     ],
-    videoUrl: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=800&auto=format&fit=crop&q=80',
+    videoUrl: '/assets/founders/videos/pouya-training.mp4',
     difficulty: 'Beginner'
   }
 ];
@@ -432,7 +432,7 @@ export const INITIAL_TEMPLATES: WorkoutTemplate[] = [
             exerciseName: 'Incline Dumbbell Bench Press',
             targetMuscle: 'Chest',
             equipment: 'Dumbbell',
-            videoUrl: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
+            videoUrl: '/assets/founders/videos/mass-training-1.mp4',
             restSeconds: 120,
             coachNotes: 'Heavy working sets. Aim for 2 RIR on the final set.',
             sets: [
@@ -510,7 +510,7 @@ export const INITIAL_ASSIGNED_WORKOUT: AssignedWorkout = {
       exerciseName: 'Incline Dumbbell Bench Press',
       targetMuscle: 'Chest',
       equipment: 'Dumbbell',
-      videoUrl: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
+      videoUrl: '/assets/founders/videos/mass-training-1.mp4',
       restSeconds: 90,
       coachNotes: 'Pause for 1 second at the chest stretch. Focus on pec stretch before pressing.',
       clientNotes: '',
@@ -526,7 +526,7 @@ export const INITIAL_ASSIGNED_WORKOUT: AssignedWorkout = {
       exerciseName: 'Lat Pulldown (Neutral Grip)',
       targetMuscle: 'Back',
       equipment: 'Cable',
-      videoUrl: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&auto=format&fit=crop&q=80',
+      videoUrl: '/assets/founders/videos/mass-training-2.mp4',
       restSeconds: 90,
       coachNotes: 'Drive elbows down to hips. 3-second eccentric stretch on each repetition.',
       clientNotes: '',
@@ -542,7 +542,7 @@ export const INITIAL_ASSIGNED_WORKOUT: AssignedWorkout = {
       exerciseName: 'Standing Dumbbell Lateral Raise',
       targetMuscle: 'Shoulders',
       equipment: 'Dumbbell',
-      videoUrl: 'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?w=800&auto=format&fit=crop&q=80',
+      videoUrl: '/assets/founders/videos/pouya-training.mp4',
       restSeconds: 60,
       coachNotes: 'Superset: go directly to Tricep Pushdowns with no rest between pairs.',
       supersetWithId: 'we_4',
@@ -559,7 +559,7 @@ export const INITIAL_ASSIGNED_WORKOUT: AssignedWorkout = {
       exerciseName: 'Cable Triceps Rope Pushdown',
       targetMuscle: 'Arms',
       equipment: 'Cable',
-      videoUrl: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=800&auto=format&fit=crop&q=80',
+      videoUrl: '/assets/founders/videos/mass-training-1.mp4',
       restSeconds: 60,
       coachNotes: 'Spread rope handles at lock out.',
       clientNotes: '',

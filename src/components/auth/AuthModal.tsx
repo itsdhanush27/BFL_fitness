@@ -54,12 +54,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Sync mode whenever initialMode or isOpen changes
+  // Sync mode and reset form state whenever modal opens or mode changes
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setError(null);
       setSuccessMessage(null);
+      // Clear all form fields so stale values don't leak between sessions
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setName('');
+      setGoal('hypertrophy');
+      setShowPassword(false);
     }
   }, [initialMode, isOpen]);
 

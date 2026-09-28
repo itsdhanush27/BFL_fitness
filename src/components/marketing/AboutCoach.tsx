@@ -152,7 +152,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       subtitle: 'Australian Posing School • Stage Posing #33',
       src: massImage1 || massStageImg || '/assets/founders/mass-stage.png',
       objectPosition: 'object-[center_20%]',
-      fallback: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900&auto=format&fit=crop&q=80',
+      fallback: '/assets/founders/mass-stage.png',
       founderName: cmsContent.massFounder?.title || 'Mass Narimanian',
       founderRole: 'Founder & Coach'
     },
@@ -164,7 +164,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       subtitle: 'Peak Hypertrophy & Muscularity',
       src: massImage2 || massGymImg || '/assets/founders/mass-gym.jpg',
       objectPosition: 'object-top',
-      fallback: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?w=900&auto=format&fit=crop&q=80',
+      fallback: '/assets/founders/mass-gym.jpg',
       founderName: cmsContent.massFounder?.title || 'Mass Narimanian',
       founderRole: 'Founder & Coach'
     },
@@ -208,7 +208,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       subtitle: 'Barbell Deadlift Mechanics & Raw Strength',
       src: pouyaImage1 || pouyaPowerliftingImg || '/assets/founders/pouya-powerlifting.jpg',
       objectPosition: 'object-top',
-      fallback: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=900&auto=format&fit=crop&q=80',
+      fallback: '/assets/founders/pouya-powerlifting.jpg',
       founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
       founderRole: 'Founder & Coach'
     },
@@ -220,7 +220,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       subtitle: 'Competitive Boxing & High-Performance Conditioning',
       src: pouyaImage2 || pouyaBoxingImg || '/assets/founders/pouya-boxing.jpg',
       objectPosition: 'object-top',
-      fallback: 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=900&auto=format&fit=crop&q=80',
+      fallback: '/assets/founders/pouya-boxing.jpg',
       founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
       founderRole: 'Founder & Coach'
     },
@@ -233,7 +233,7 @@ export const AboutCoach: React.FC<AboutCoachProps> = ({
       src: '/assets/founders/6695.jpg',
       altSrc: pouyaPhysiqueImg || '/assets/founders/pouya-portrait.jpg',
       objectPosition: 'object-top',
-      fallback: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=900&auto=format&fit=crop&q=80',
+      fallback: '/assets/founders/pouya-portrait.jpg',
       founderName: cmsContent.pouyaFounder?.title || 'Pouya Marghzari',
       founderRole: 'Founder & Coach'
     },

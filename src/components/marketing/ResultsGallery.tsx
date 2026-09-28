@@ -91,6 +91,25 @@ export const ResultsGallery: React.FC<{ onApply: () => void }> = ({ onApply }) =
                   </p>
                 </div>
 
+                <div className="flex items-center gap-3 p-3 rounded-2xl bg-white border border-neutral-200 shadow-xs">
+                  <div className="flex -space-x-2 shrink-0">
+                    <img
+                      src="/assets/founders/mass-gym.jpg"
+                      alt="Mass Narimanian"
+                      className="w-8 h-8 rounded-full border-2 border-white object-cover"
+                    />
+                    <img
+                      src="/assets/founders/pouya-boxing.jpg"
+                      alt="Pouya Marghzari"
+                      className="w-8 h-8 rounded-full border-2 border-white object-cover"
+                    />
+                  </div>
+                  <div className="text-xs">
+                    <span className="font-bold text-neutral-900 block">Direct Coaching Oversight</span>
+                    <span className="text-neutral-500 text-[11px]">Periodized & programmed directly by Founders Mass & Pouya</span>
+                  </div>
+                </div>
+
                 <div className="pt-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
                   <button
                     onClick={onApply}

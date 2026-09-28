@@ -30,6 +30,14 @@ export interface ClientRosterItem {
   activePlanId?: string;
   activePlanName?: string;
   activePlanPrice?: number;
+  waistCm?: number;
+  chestCm?: number;
+  bicepsCm?: number;
+  baselineMeasurements?: {
+    chestCm?: number;
+    waistCm?: number;
+    bicepsCm?: number;
+  };
 }
 
 export interface UserProfile {
@@ -57,6 +65,14 @@ export interface UserProfile {
   renewalRequestedPlanName?: string;
   renewalRequestedPlanPrice?: number;
   renewalRequestedAt?: string;
+  waistCm?: number;
+  chestCm?: number;
+  bicepsCm?: number;
+  baselineMeasurements?: {
+    chestCm?: number;
+    waistCm?: number;
+    bicepsCm?: number;
+  };
 }
 
 export interface CoachingPlan {
@@ -204,12 +220,14 @@ export interface NutritionPlan {
   dailyNotes: string;
   supplementGuide: string[];
   updatedAt: string;
+  isPrescribed?: boolean;
 }
 
 export interface WeeklyCheckIn {
   id: string;
   clientId: string;
   clientName: string;
+  clientEmail?: string;
   weekNumber: number;
   submissionDate: string;
   weightKg: number;

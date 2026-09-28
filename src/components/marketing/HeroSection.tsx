@@ -1,5 +1,19 @@
-import React from 'react';
-import { ArrowRight, CheckCircle2, Flame, Award, Users, TrendingUp, Sparkles } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { 
+  ArrowRight, 
+  CheckCircle2, 
+  Flame, 
+  Award, 
+  Users, 
+  TrendingUp, 
+  Sparkles, 
+  Play, 
+  Pause, 
+  Volume2, 
+  VolumeX, 
+  ShieldCheck, 
+  Film 
+} from 'lucide-react';
 import { useFitnessData } from '../../context/FitnessDataContext';
 
 interface HeroSectionProps {
@@ -9,6 +23,57 @@ interface HeroSectionProps {
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ onApply, onExplorePlans }) => {
   const { cmsContent } = useFitnessData();
+
+  // Founder Video States
+  const [massMuted, setMassMuted] = useState<boolean>(true);
+  const [pouyaMuted, setPouyaMuted] = useState<boolean>(true);
+  const [massPlaying, setMassPlaying] = useState<boolean>(true);
+  const [pouyaPlaying, setPouyaPlaying] = useState<boolean>(true);
+
+  const massVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pouyaVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  const toggleMassPlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (massVideoRef.current) {
+      if (massPlaying) {
+        massVideoRef.current.pause();
+        setMassPlaying(false);
+      } else {
+        massVideoRef.current.play();
+        setMassPlaying(true);
+      }
+    }
+  };
+
+  const toggleMassMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (massVideoRef.current) {
+      massVideoRef.current.muted = !massMuted;
+      setMassMuted(!massMuted);
+    }
+  };
+
+  const togglePouyaPlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (pouyaVideoRef.current) {
+      if (pouyaPlaying) {
+        pouyaVideoRef.current.pause();
+        setPouyaPlaying(false);
+      } else {
+        pouyaVideoRef.current.play();
+        setPouyaPlaying(true);
+      }
+    }
+  };
+
+  const togglePouyaMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (pouyaVideoRef.current) {
+      pouyaVideoRef.current.muted = !pouyaMuted;
+      setPouyaMuted(!pouyaMuted);
+    }
+  };
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-b from-white via-neutral-50 to-white pt-12 pb-24 border-b border-neutral-200">
@@ -77,6 +142,154 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onApply, onExplorePlan
                 <span>{pt}</span>
               </span>
             ))}
+          </div>
+        </div>
+
+        {/* FOUNDER ACTION VIDEO & PHOTO SHOWCASE */}
+        <div className="mt-16 max-w-5xl mx-auto">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-900 text-white text-xs font-bold uppercase tracking-wider shadow-sm mb-2">
+              <Film className="w-3.5 h-3.5 text-red-500" /> Live Founder Footage & Coaching Standards
+            </div>
+            <p className="text-xs text-neutral-500 font-semibold uppercase tracking-wider">
+              Coached directly by Australian bodybuilding & competitive combat founders
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Mass Narimanian Showcase Card */}
+            <div className="relative rounded-3xl overflow-hidden bg-neutral-950 border border-neutral-800 shadow-xl group hover:border-red-600/50 transition-all">
+              <div className="relative aspect-[16/10] sm:aspect-[16/11] bg-neutral-900 overflow-hidden">
+                <video
+                  ref={massVideoRef}
+                  src="/assets/founders/videos/mass-training-1.mp4"
+                  poster="/assets/founders/mass-gym.jpg"
+                  autoPlay
+                  loop
+                  muted={massMuted}
+                  playsInline
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/30 to-black/20 pointer-events-none" />
+
+                {/* Video controls overlay */}
+                <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+                  <button
+                    type="button"
+                    onClick={toggleMassPlay}
+                    className="p-2 rounded-xl bg-black/60 hover:bg-red-600 text-white backdrop-blur-md transition-colors cursor-pointer border border-white/10"
+                    title={massPlaying ? 'Pause Video' : 'Play Video'}
+                  >
+                    {massPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleMassMute}
+                    className="p-2 rounded-xl bg-black/60 hover:bg-red-600 text-white backdrop-blur-md transition-colors cursor-pointer border border-white/10"
+                    title={massMuted ? 'Unmute Audio' : 'Mute Audio'}
+                  >
+                    {massMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {/* Founder Badge */}
+                <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+                  <span className="px-3 py-1 rounded-full bg-red-600/90 text-white text-[11px] font-black uppercase tracking-wider backdrop-blur-md shadow-md border border-red-400/40">
+                    IFBB Competitor
+                  </span>
+                </div>
+              </div>
+
+              {/* Card Meta */}
+              <div className="p-6 bg-neutral-950 text-white space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black font-display uppercase tracking-tight text-white flex items-center gap-2">
+                      <span>Mass Narimanian</span>
+                      <ShieldCheck className="w-4 h-4 text-red-500" />
+                    </h3>
+                    <p className="text-xs text-neutral-400 font-semibold">Founder & Head Coach • 15+ Yrs Stage Posing & Hypertrophy</p>
+                  </div>
+                  <a
+                    href="#coach"
+                    className="text-xs font-bold text-red-400 hover:text-red-300 flex items-center gap-1 uppercase tracking-wider"
+                  >
+                    <span>Profile</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </a>
+                </div>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  Specializing in maximum muscular hypertrophy, stage biomechanics, and contest-ready conditioning protocols.
+                </p>
+              </div>
+            </div>
+
+            {/* Pouya Marghzari Showcase Card */}
+            <div className="relative rounded-3xl overflow-hidden bg-neutral-950 border border-neutral-800 shadow-xl group hover:border-red-600/50 transition-all">
+              <div className="relative aspect-[16/10] sm:aspect-[16/11] bg-neutral-900 overflow-hidden">
+                <video
+                  ref={pouyaVideoRef}
+                  src="/assets/founders/videos/pouya-training.mp4"
+                  poster="/assets/founders/pouya-boxing.jpg"
+                  autoPlay
+                  loop
+                  muted={pouyaMuted}
+                  playsInline
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/30 to-black/20 pointer-events-none" />
+
+                {/* Video controls overlay */}
+                <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+                  <button
+                    type="button"
+                    onClick={togglePouyaPlay}
+                    className="p-2 rounded-xl bg-black/60 hover:bg-red-600 text-white backdrop-blur-md transition-colors cursor-pointer border border-white/10"
+                    title={pouyaPlaying ? 'Pause Video' : 'Play Video'}
+                  >
+                    {pouyaPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={togglePouyaMute}
+                    className="p-2 rounded-xl bg-black/60 hover:bg-red-600 text-white backdrop-blur-md transition-colors cursor-pointer border border-white/10"
+                    title={pouyaMuted ? 'Unmute Audio' : 'Mute Audio'}
+                  >
+                    {pouyaMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {/* Founder Badge */}
+                <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+                  <span className="px-3 py-1 rounded-full bg-red-600/90 text-white text-[11px] font-black uppercase tracking-wider backdrop-blur-md shadow-md border border-red-400/40">
+                    Competitive Boxer & Powerlifter
+                  </span>
+                </div>
+              </div>
+
+              {/* Card Meta */}
+              <div className="p-6 bg-neutral-950 text-white space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black font-display uppercase tracking-tight text-white flex items-center gap-2">
+                      <span>Pouya Marghzari</span>
+                      <ShieldCheck className="w-4 h-4 text-red-500" />
+                    </h3>
+                    <p className="text-xs text-neutral-400 font-semibold">Founder & Head Coach • 10+ Yrs Combat Conditioning & Strength</p>
+                  </div>
+                  <a
+                    href="#coach"
+                    className="text-xs font-bold text-red-400 hover:text-red-300 flex items-center gap-1 uppercase tracking-wider"
+                  >
+                    <span>Profile</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </a>
+                </div>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  Specializing in explosive rotational power, kinetic chain speed, and maximal barbell powerlifting overload.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 

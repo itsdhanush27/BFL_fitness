@@ -45,24 +45,57 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
   } = useFitnessData();
   const checkIns = propCheckIns || ctxCheckIns;
 
-  const targetClientId = clientId || (user?.role === 'client' ? user.uid : (clients[0]?.id || ''));
+  const targetEmail = (user?.email || '').toLowerCase().trim();
+  const userName = (user?.displayName || '').toLowerCase().trim();
+  const clientInfo = clients.find(c => 
+    (clientId && c.id === clientId) || 
+    (targetEmail && c.email && c.email.toLowerCase().trim() === targetEmail) ||
+    (userName && userName !== 'valued athlete' && userName !== 'athlete' && c.name && c.name.toLowerCase().trim() === userName)
+  );
+  const targetClientId = clientId || clientInfo?.id || (user?.role === 'client' ? user.uid : (clients[0]?.id || ''));
   const isRealUser = Boolean(targetClientId && targetClientId !== 'client_alex');
-  const clientInfo = clients.find(c => c.id === targetClientId);
+  const resolvedEmail = (clientInfo?.email || targetEmail || '').toLowerCase().trim();
 
   // Resolve active onboarding intake submission for this client (for coach inspecting or client self)
   const allIntakes = intakeForms || intakeSubmissions || [];
   const effectiveIntake = React.useMemo(() => {
-    if (!targetClientId) return clientIntake || null;
-    const byId = allIntakes.find(i => i.clientId === targetClientId);
-    if (byId) return byId;
-    if (clientInfo?.email) {
-      const byEmail = allIntakes.find(i => i.clientEmail && i.clientEmail.toLowerCase() === clientInfo.email.toLowerCase());
+    const athleteName = (clientInfo?.name || (user?.role === 'client' ? user.displayName : '') || '').toLowerCase().trim();
+
+    // 1. Match in allIntakes by clientId
+    if (targetClientId) {
+      const byId = allIntakes.find(i => i.clientId === targetClientId);
+      if (byId) return byId;
+    }
+    // 2. Match in allIntakes by resolved email
+    if (resolvedEmail) {
+      const byEmail = allIntakes.find(i => i.clientEmail && i.clientEmail.toLowerCase().trim() === resolvedEmail);
       if (byEmail) return byEmail;
     }
-    return clientIntake || null;
-  }, [targetClientId, allIntakes, clientInfo, clientIntake]);
+    // 3. Match in allIntakes by name
+    if (athleteName && athleteName !== 'valued athlete' && athleteName !== 'athlete') {
+      const byName = allIntakes.find(i => i.clientName && i.clientName.toLowerCase().trim() === athleteName);
+      if (byName) return byName;
+    }
+    // 4. Fallback to clientIntake ONLY if it belongs to this client and does not conflict with athlete name
+    if (clientIntake) {
+      const idMatches = targetClientId && clientIntake.clientId === targetClientId;
+      const emailMatches = resolvedEmail && clientIntake.clientEmail && clientIntake.clientEmail.toLowerCase().trim() === resolvedEmail;
+      const nameMatches = athleteName && clientIntake.clientName && clientIntake.clientName.toLowerCase().trim() === athleteName;
+      const nameConflicts = athleteName && clientIntake.clientName && 
+        clientIntake.clientName.toLowerCase().trim() !== athleteName && 
+        athleteName !== 'valued athlete' && athleteName !== 'athlete';
+      if (!nameConflicts && (idMatches || emailMatches || nameMatches)) {
+        return clientIntake;
+      }
+    }
+    // Never fall back to another athlete's intake!
+    return null;
+  }, [targetClientId, allIntakes, resolvedEmail, clientInfo, clientIntake, user?.displayName]);
 
-  const clientDisplayName = (clientInfo?.name || effectiveIntake?.clientName || (user?.role === 'client' ? user.displayName : undefined)) || 'Valued Athlete';
+  const clientDisplayName = clientInfo?.name || 
+    (user?.role === 'client' && user.displayName && user.displayName !== 'Valued Athlete' ? user.displayName : undefined) || 
+    effectiveIntake?.clientName || 
+    'Athlete';
 
   // Synthesize dynamic client metrics strictly from:
   // 1. Onboarding intake baseline (Point 0: Onboarding)
@@ -71,19 +104,24 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
   const clientMetrics = React.useMemo(() => {
     const list: (ProgressMetricPoint & { weekLabel?: string; isBaseline?: boolean; weekNumber?: number })[] = [];
 
-    // 1. Add baseline from onboarding intake
-    if (effectiveIntake && Number(effectiveIntake.currentWeightKg) > 0) {
-      const intakeDate = effectiveIntake.submittedAt 
+    // 1. Add baseline from onboarding intake or clientInfo
+    const baselineWeight = Number(effectiveIntake?.currentWeightKg || clientInfo?.startingWeightKg || clientInfo?.currentWeightKg || 0);
+    const baselineWaistVal = effectiveIntake?.baselineMeasurements?.waistCm ?? (clientInfo as any)?.waistCm ?? (clientInfo as any)?.baselineMeasurements?.waistCm;
+    const baselineChestVal = effectiveIntake?.baselineMeasurements?.chestCm ?? (clientInfo as any)?.chestCm ?? (clientInfo as any)?.baselineMeasurements?.chestCm;
+    const baselineBicepsVal = effectiveIntake?.baselineMeasurements?.bicepsCm ?? (clientInfo as any)?.bicepsCm ?? (clientInfo as any)?.baselineMeasurements?.bicepsCm;
+
+    if (baselineWeight > 0) {
+      const intakeDate = effectiveIntake?.submittedAt 
         ? (typeof effectiveIntake.submittedAt === 'string' ? effectiveIntake.submittedAt.split('T')[0] : 'Baseline') 
-        : 'Baseline';
+        : (clientInfo?.joinedDate || 'Baseline');
       list.push({
         id: 'metric_intake_baseline',
         clientId: targetClientId,
         date: intakeDate,
-        weightKg: Number(effectiveIntake.currentWeightKg),
-        waistCm: effectiveIntake.baselineMeasurements?.waistCm ? Number(effectiveIntake.baselineMeasurements.waistCm) : undefined,
-        chestCm: effectiveIntake.baselineMeasurements?.chestCm ? Number(effectiveIntake.baselineMeasurements.chestCm) : undefined,
-        bicepsCm: effectiveIntake.baselineMeasurements?.bicepsCm ? Number(effectiveIntake.baselineMeasurements.bicepsCm) : undefined,
+        weightKg: baselineWeight,
+        waistCm: baselineWaistVal ? Number(baselineWaistVal) : undefined,
+        chestCm: baselineChestVal ? Number(baselineChestVal) : undefined,
+        bicepsCm: baselineBicepsVal ? Number(baselineBicepsVal) : undefined,
         notes: 'Baseline recorded from Onboarding Intake',
         weekLabel: 'Onboarding',
         isBaseline: true,
@@ -95,7 +133,7 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
     const clientCheckIns = (checkIns || []).filter(c => 
       c.clientId === targetClientId || 
       (targetClientId && c.clientId && c.clientId.toLowerCase() === targetClientId.toLowerCase()) ||
-      (clientInfo?.email && (c as any).clientEmail && (c as any).clientEmail.toLowerCase() === clientInfo.email.toLowerCase()) ||
+      (clientInfo?.email && c.clientEmail && c.clientEmail.toLowerCase() === clientInfo.email.toLowerCase()) ||
       (clientInfo?.name && c.clientName && c.clientName.toLowerCase() === clientInfo.name.toLowerCase())
     );
 
@@ -226,8 +264,8 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
   const baselineMetric = clientMetrics.find(m => m.isBaseline) || clientMetrics[0];
   const latestMetric = clientMetrics[clientMetrics.length - 1];
 
-  const startingWeight = Number(effectiveIntake?.currentWeightKg || baselineMetric?.weightKg || clientInfo?.startingWeightKg || 0);
-  const currentWeight = Number(latestMetric?.weightKg || startingWeight);
+  const startingWeight = Number(effectiveIntake?.currentWeightKg || baselineMetric?.weightKg || clientInfo?.startingWeightKg || clientInfo?.currentWeightKg || 0);
+  const currentWeight = Number(latestMetric?.weightKg || clientInfo?.currentWeightKg || startingWeight);
   const targetWeight = Number(effectiveIntake?.targetWeightKg || clientInfo?.targetWeightKg || 0);
   const weightChange = startingWeight > 0 ? Number((currentWeight - startingWeight).toFixed(1)) : 0;
   const weightRemaining = targetWeight > 0 ? Math.abs(currentWeight - targetWeight).toFixed(1) : '0.0';
@@ -236,7 +274,7 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
   const metricsWithWaist = clientMetrics.filter(m => typeof m.waistCm === 'number' && (m.waistCm as number) > 0);
   const latestWaistMetric = metricsWithWaist[metricsWithWaist.length - 1];
   const initialWaistMetric = metricsWithWaist[0];
-  const baselineWaist = Number(effectiveIntake?.baselineMeasurements?.waistCm || initialWaistMetric?.waistCm || 0);
+  const baselineWaist = Number(effectiveIntake?.baselineMeasurements?.waistCm || initialWaistMetric?.waistCm || (clientInfo as any)?.waistCm || (clientInfo as any)?.baselineMeasurements?.waistCm || 0);
   const currentWaist = Number(latestWaistMetric?.waistCm || (baselineWaist > 0 ? baselineWaist : 0));
   const startingWaist = Number(baselineWaist > 0 ? baselineWaist : (initialWaistMetric?.waistCm || 0));
   const waistDiff = startingWaist > 0 && currentWaist > 0 && startingWaist !== currentWaist
@@ -267,6 +305,7 @@ export const ProgressAnalyticsView: React.FC<ProgressAnalyticsViewProps> = ({
       submitWeeklyCheckIn({
         clientId: targetClientId,
         clientName: clientDisplayName,
+        clientEmail: clientInfo?.email || undefined,
         weekNumber: (checkIns?.length || 0) + 1,
         weightKg: w,
         waistMeasurementCm: wst,

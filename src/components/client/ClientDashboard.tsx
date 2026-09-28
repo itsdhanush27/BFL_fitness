@@ -29,7 +29,8 @@ import {
   Lock,
   RefreshCw,
   Zap,
-  ShieldAlert
+  ShieldAlert,
+  X
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFitnessData, isPlanExpired, getDaysRemaining } from '../../context/FitnessDataContext';
@@ -65,11 +66,21 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
   const [activeTab, setActiveTab] = useState<'schedule' | 'workout' | 'nutrition' | 'checkin' | 'chat' | 'progress'>('schedule');
   const [activeExerciseIndex, setActiveExerciseIndex] = useState<number>(0);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [activeVideoModal, setActiveVideoModal] = useState<{
+    isOpen: boolean;
+    exerciseName: string;
+    targetMuscle?: string;
+    equipment?: string;
+    videoUrl: string;
+    coachNotes?: string;
+    founderAttribution: string;
+  } | null>(null);
 
+  // Cross-check the live clients roster (updated synchronously by coach approval)
   // Cross-check the live clients roster (updated synchronously by coach approval)
   // to override any stale AuthContext user values from localStorage.
   const clientRosterEntry = clients.find(
-    c => c.id === user?.uid || c.email === user?.email
+    c => c.id === user?.uid || (user?.email && c.email && c.email.toLowerCase() === user.email.toLowerCase())
   );
 
   // Merge: clients roster takes priority when it shows 'active' or 'pending'
@@ -80,18 +91,54 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
   const effectiveApprovalStatus: string =
     (clientRosterEntry as any)?.approvalStatus || (user as any)?.approvalStatus || '';
 
-  // isRenewalPending MUST take priority over isExpired
-  // But if the roster or user shows 'active', we are NOT pending any more.
-  const isRenewalPending =
-    effectiveSubStatus !== 'active' &&
-    effectiveStatus !== 'active' &&
-    effectiveApprovalStatus !== 'approved' &&
-    (
-      effectiveSubStatus === 'pending_approval' ||
-      effectiveApprovalStatus === 'pending' ||
-      effectiveStatus === 'pending' ||
-      Boolean(user?.renewalRequestedPlanId || clientRosterEntry?.renewalRequestedPlanId)
-    );
+  // Coach activation is authoritative:
+  // If the live roster shows 'active' or 'approved', or intake is 'active',
+  // then the coach has explicitly approved & activated this athlete!
+  const isCoachApproved = Boolean(
+    (clientRosterEntry && 
+      (clientRosterEntry.status === 'active' || (clientRosterEntry as any).approvalStatus === 'approved') && 
+      clientRosterEntry.subscriptionStatus !== 'pending_approval') ||
+    (clientIntake && clientIntake.status === 'active') ||
+    (!clientRosterEntry && (user as any)?.status === 'active' && (user as any)?.approvalStatus === 'approved' && user?.subscriptionStatus !== 'pending_approval')
+  );
+
+  const isIntakePendingReview = Boolean(
+    !isCoachApproved &&
+    clientIntake &&
+    (clientIntake.status === 'pending_review' || (clientIntake as any).approvalStatus === 'pending')
+  );
+
+  const isRosterPending = Boolean(
+    !isCoachApproved &&
+    clientRosterEntry && (
+      clientRosterEntry.status === 'pending' ||
+      clientRosterEntry.subscriptionStatus === 'pending_approval' ||
+      (clientRosterEntry as any).approvalStatus === 'pending'
+    )
+  );
+
+  // isRenewalPending: TRUE ONLY when NOT approved by coach and awaiting review
+  // Once the coach approves and activates, isRenewalPending is strictly FALSE!
+  const isRenewalPending = !isCoachApproved && Boolean(
+    isIntakePendingReview ||
+    isRosterPending ||
+    effectiveSubStatus === 'pending_approval' ||
+    effectiveApprovalStatus === 'pending' ||
+    effectiveStatus === 'pending' ||
+    Boolean(user?.renewalRequestedPlanId || clientRosterEntry?.renewalRequestedPlanId) ||
+    (!clientRosterEntry && Boolean(clientIntake))
+  );
+
+  // Automatically sync local clientIntake if coach has approved the roster entry
+  useEffect(() => {
+    if (isCoachApproved && clientIntake && clientIntake.status !== 'active') {
+      clientIntake.status = 'active';
+      (clientIntake as any).approvalStatus = 'approved';
+      try {
+        localStorage.setItem('bfl_client_intake', JSON.stringify(clientIntake));
+      } catch {}
+    }
+  }, [isCoachApproved, clientIntake]);
   const isExpired = !isRenewalPending && (
     isPlanExpired({ 
       planExpiresAt: clientRosterEntry?.planExpiresAt ?? user?.planExpiresAt, 
@@ -128,6 +175,26 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
 
   // Dynamic Coach and Client Data Resolution
   const clientCoachId = user?.assignedCoachId || user?.coachId || (clientIntake as any)?.assignedCoachId || (clientIntake as any)?.coachId;
+
+  // Accurately resolve client plan name and price from roster or intake
+  const activePlan = coachingPlans.find(p => p.id === user?.activePlanId) || coachingPlans[0];
+
+  const displayPlanName = 
+    clientRosterEntry?.planName ||
+    clientRosterEntry?.activePlanName ||
+    (clientIntake as any)?.selectedPlanName ||
+    user?.activePlanName ||
+    (user as any)?.renewalRequestedPlanName ||
+    activePlan?.name ||
+    'Coaching Program';
+
+  const displayPlanPrice = 
+    clientRosterEntry?.activePlanPrice ||
+    (clientIntake as any)?.selectedPlanPrice ||
+    user?.activePlanPrice ||
+    (user as any)?.renewalRequestedPlanPrice ||
+    activePlan?.price ||
+    '80';
   const assignedCoach = coaches.find(c => c.id === clientCoachId) || coaches.find(c => c.id === 'admin_mass_narimanian') || coaches[0] || {
     id: 'admin_mass_narimanian',
     name: 'Mass Narimanian',
@@ -136,8 +203,6 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
     email: 'mass@bflfitness.com',
     avatarUrl: '/assets/founders/mass-gym.jpg'
   };
-
-  const activePlan = coachingPlans.find(p => p.id === user?.activePlanId) || coachingPlans[0];
   const clientDisplayName = user?.displayName || clientIntake?.clientName || 'Valued Athlete';
   const isWorkoutAssignedToMe = Boolean(
     assignedWorkout &&
@@ -243,6 +308,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
     submitWeeklyCheckIn({
       clientId: user?.uid || clientIntake?.clientId || 'client_athlete',
       clientName: clientDisplayName,
+      clientEmail: user?.email || clientIntake?.clientEmail || undefined,
       weekNumber: checkIns.length + 1,
       weightKg: checkInWeight,
       adherenceRating: checkInAdherence,
@@ -293,7 +359,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
                 ) : isRenewalPending ? (
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-xs">
                     <Clock className="w-3 h-3 text-amber-600 animate-spin" />
-                    <span>Awaiting Program Initialization</span>
+                    <span>Awaiting Coach Activation</span>
                   </span>
                 ) : (
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-xs">
@@ -305,7 +371,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
               <p className="text-xs text-neutral-500 mt-0.5 flex flex-wrap items-center gap-2">
                 <span>Coach: <strong className="text-neutral-800">{assignedCoach.name}</strong></span>
                 <span>&bull;</span>
-                <span>Plan: <strong className="text-red-600 font-semibold">{activePlan.name}</strong></span>
+                <span>Plan: <strong className="text-red-600 font-semibold">{displayPlanName}</strong></span>
                 {isExpired ? (
                   <>
                     <span>&bull;</span>
@@ -317,7 +383,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
                   <>
                     <span>&bull;</span>
                     <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 font-bold border border-amber-200">
-                      Coach Initializing Program...
+                      Awaiting Coach Review & Activation...
                     </span>
                   </>
                 ) : user?.planExpiresAt ? (
@@ -377,7 +443,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
               <div className="bg-neutral-50 border border-neutral-200 rounded-xl px-3.5 py-2 text-center min-w-[95px] shadow-xs">
                 <span className="text-[10px] text-neutral-500 uppercase font-semibold block">Calories</span>
                 <span className="text-base font-black text-neutral-900 font-mono">
-                  {nutritionPlan ? `${nutritionPlan.calories} kcal` : 'Pending'}
+                  {nutritionPlan && (nutritionPlan.isPrescribed || (nutritionPlan as any).prescribedByCoach) && nutritionPlan.calories > 0
+                    ? `${nutritionPlan.calories} kcal` 
+                    : 'Pending'}
                 </span>
               </div>
             </div>
@@ -632,14 +700,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
                   </h2>
                   <p className="text-neutral-300 text-sm sm:text-base leading-relaxed max-w-xl">
                     Your payment for{' '}
-                    <strong className="text-white font-bold">{user?.renewalRequestedPlanName || activePlan.name}</strong>
-                    {user?.renewalRequestedPlanPrice ? (
-                      <span className="text-amber-400 font-black font-mono"> (${user.renewalRequestedPlanPrice})</span>
-                    ) : null}{' '}
+                    <strong className="text-white font-bold">{user?.renewalRequestedPlanName || displayPlanName}</strong>
+                    <span className="text-amber-400 font-black font-mono"> (${displayPlanPrice})</span>{' '}
                     has been received. Coach{' '}
                     <strong className="text-amber-400">Mass Narimanian</strong> &{' '}
                     <strong className="text-amber-400">Coach Pouya Marghzari</strong>{' '}
-                    are now building your custom periodized routine and macro prescription from scratch.
+                    are reviewing your onboarding metrics and initializing your custom program split.
                   </p>
                 </div>
 
@@ -685,13 +751,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
                   {
                     step: 1,
                     label: 'Payment Processed',
-                    detail: `$${user?.renewalRequestedPlanPrice || activePlan.price} collected · Receipt sent to ${user?.email || 'your email'}`,
+                    detail: `$${displayPlanPrice} collected · Receipt sent to ${user?.email || 'your email'}`,
                     status: 'done'
                   },
                   {
                     step: 2,
-                    label: 'Renewal Request Submitted to Admin',
-                    detail: 'Coach Mass & Coach Pouya have been notified with your plan selection and biometric history.',
+                    label: clientIntake ? 'Intake Form & Biometrics Submitted' : 'Renewal Request Submitted to Admin',
+                    detail: 'Coach Mass & Coach Pouya have received your split goals, medical notes and biometrics.',
                     status: 'done'
                   },
                   {
@@ -1115,17 +1181,32 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
                   </h3>
                 </div>
 
-                {/* Video Demo Link */}
+                {/* Video Demo Link / Modal Trigger */}
                 {currentExercise.videoUrl && (
-                  <a
-                    href={currentExercise.videoUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-neutral-50 border border-neutral-200 text-xs font-bold text-neutral-700 hover:text-neutral-900 hover:border-red-500 transition-colors shrink-0 shadow-xs"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isPouya = currentExercise.videoUrl.toLowerCase().includes('pouya');
+                      const isMass = currentExercise.videoUrl.toLowerCase().includes('mass');
+                      setActiveVideoModal({
+                        isOpen: true,
+                        exerciseName: currentExercise.exerciseName,
+                        targetMuscle: currentExercise.targetMuscle,
+                        equipment: currentExercise.equipment,
+                        videoUrl: currentExercise.videoUrl,
+                        coachNotes: currentExercise.coachNotes,
+                        founderAttribution: isPouya 
+                          ? 'Founder & Coach Pouya Marghzari (Powerlifting & Boxing Specialist)'
+                          : isMass
+                          ? 'Founder & Head Coach Mass Narimanian (IFBB Competitor & Biomechanics)'
+                          : 'BFL Head Coach'
+                      });
+                    }}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 hover:bg-red-100 hover:border-red-300 transition-all shrink-0 shadow-xs cursor-pointer group"
                   >
-                    <ExternalLink className="w-3.5 h-3.5 text-red-600" />
-                    <span>View Form Cues & Video</span>
-                  </a>
+                    <Play className="w-3.5 h-3.5 text-red-600 fill-red-600 group-hover:scale-110 transition-transform" />
+                    <span>Watch Founder Technique Video</span>
+                  </button>
                 )}
               </div>
 
@@ -1284,7 +1365,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
         {/* 3. MACROS & NUTRITION VIEW */}
         {activeTab === 'nutrition' && (
           <div className="space-y-8">
-            {nutritionPlan ? (
+            {nutritionPlan && (nutritionPlan.isPrescribed || (nutritionPlan as any).prescribedByCoach) && nutritionPlan.calories > 0 ? (
               <div className="bg-white border border-neutral-200 rounded-3xl p-6 sm:p-8 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
                   <div>
@@ -1750,9 +1831,9 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
           </div>
         )}
 
-        {/* 6. PROGRESS & BIOMETRIC ANALYTICS */}
+        {/* 2. PROGRESS & ANALYTICS VIEW */}
         {activeTab === 'progress' && (
-          <ProgressAnalyticsView clientId={user?.uid} />
+          <ProgressAnalyticsView clientId={clientRosterEntry?.id || user?.uid} />
         )}
           </>
         )}
@@ -1854,6 +1935,88 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onLogout }) =>
           setShowRenewalPayment(false);
         }}
       />
+
+      {/* In-App Founder Video Technique Modal */}
+      {activeVideoModal && activeVideoModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-3xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl text-white">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/90">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-red-600/20 border border-red-500/40 flex items-center justify-center">
+                  <Play className="w-4 h-4 text-red-500 fill-red-500" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight font-display">
+                    {activeVideoModal.exerciseName}
+                  </h3>
+                  <div className="flex items-center gap-2 text-[11px] text-neutral-400">
+                    {activeVideoModal.targetMuscle && (
+                      <span className="text-red-400 font-bold uppercase">{activeVideoModal.targetMuscle}</span>
+                    )}
+                    {activeVideoModal.equipment && (
+                      <>
+                        <span>&bull;</span>
+                        <span>{activeVideoModal.equipment}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveVideoModal(null)}
+                className="w-8 h-8 rounded-full bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Video Player */}
+            <div className="p-4 sm:p-6 bg-black flex flex-col items-center">
+              <video
+                src={activeVideoModal.videoUrl}
+                controls
+                autoPlay
+                loop
+                playsInline
+                className="w-full max-h-[460px] bg-neutral-950 rounded-2xl border border-neutral-800 object-contain shadow-lg"
+              />
+            </div>
+
+            {/* Modal Details / Attribution */}
+            <div className="px-6 py-4 bg-neutral-900 border-t border-neutral-800 space-y-3">
+              <div className="flex items-center gap-2 text-xs text-neutral-300">
+                <Award className="w-4 h-4 text-red-500 shrink-0" />
+                <span className="font-semibold text-neutral-400">Execution Standard:</span>
+                <span className="text-red-400 font-bold">{activeVideoModal.founderAttribution}</span>
+              </div>
+
+              {activeVideoModal.coachNotes && (
+                <div className="p-3 rounded-xl bg-neutral-800/60 border border-neutral-700/60 flex items-start gap-2.5 text-xs text-neutral-300">
+                  <Info className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-white block mb-0.5">Biomechanical Cue:</span>
+                    {activeVideoModal.coachNotes}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 bg-neutral-950/60 border-t border-neutral-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setActiveVideoModal(null)}
+                className="px-5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer border border-neutral-700"
+              >
+                Close Video Player
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

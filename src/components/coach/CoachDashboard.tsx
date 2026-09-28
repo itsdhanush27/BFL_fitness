@@ -141,8 +141,79 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
     return goal.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
-  const currentUserId = currentUser?.id || currentUser?.uid || user?.id || user?.uid;
-  const userRole = currentUser?.role || user?.role || 'coach';
+  const authUser = user || currentUser;
+  const userRole = authUser?.role || 'coach';
+
+  // Resolve the logged-in coach record from the coaches roster / founders
+  const loggedInCoach = React.useMemo(() => {
+    const userEmail = (authUser?.email || '').toLowerCase().trim();
+    const userName = (authUser?.displayName || '').toLowerCase().trim();
+    const uid = authUser?.uid || authUser?.id;
+    const coachId = (authUser as any)?.coachId;
+
+    return coaches.find(c => 
+      (coachId && c.id === coachId) ||
+      (uid && (c.id === uid || (c as any).uid === uid)) ||
+      (userEmail && c.email && c.email.toLowerCase().trim() === userEmail) ||
+      (userName && c.name && (userName.includes(c.name.toLowerCase().trim()) || c.name.toLowerCase().trim().includes(userName)))
+    );
+  }, [coaches, authUser]);
+
+  // Set of all identifier strings that identify the currently logged-in coach / admin
+  const coachIdentifiers = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (authUser?.uid) ids.add(authUser.uid);
+    if (authUser?.id) ids.add(authUser.id);
+    if ((authUser as any)?.coachId) ids.add((authUser as any).coachId);
+    if (loggedInCoach?.id) ids.add(loggedInCoach.id);
+    if ((loggedInCoach as any)?.uid) ids.add((loggedInCoach as any).uid);
+
+    const userEmail = (authUser?.email || '').toLowerCase().trim();
+    const userName = (authUser?.displayName || '').toLowerCase().trim();
+
+    // Map known founder credentials to their canonical IDs
+    if (userEmail === 'mass@bflfitness.com' || userName.includes('mass narimanian')) {
+      ids.add('admin_mass_narimanian');
+      ids.add('mass@bflfitness.com');
+      ids.add('mass narimanian');
+      ids.add('Mass Narimanian');
+    }
+    if (userEmail === 'pouya@bflfitness.com' || userName.includes('pouya marghzari')) {
+      ids.add('admin_pouya_marghzari');
+      ids.add('pouya@bflfitness.com');
+      ids.add('pouya marghzari');
+      ids.add('Pouya Marghzari');
+    }
+
+    if (loggedInCoach?.email) ids.add(loggedInCoach.email.toLowerCase().trim());
+    if (loggedInCoach?.name) ids.add(loggedInCoach.name.toLowerCase().trim());
+
+    return ids;
+  }, [authUser, loggedInCoach]);
+
+  const activeCoachDisplayName = loggedInCoach?.name || authUser?.displayName || 'Mass Narimanian (Founder & Admin)';
+
+  const isClientAssignedToActiveCoach = React.useCallback((c: ClientRosterItem) => {
+    const clientCoachId = c.coachId || c.assignedCoachId;
+    if (!clientCoachId) return false;
+
+    // Direct match against coach identifiers
+    if (coachIdentifiers.has(clientCoachId)) return true;
+    if (coachIdentifiers.has(clientCoachId.toLowerCase().trim())) return true;
+
+    // Match by email if present on client
+    const clientCoachEmail = ((c as any).coachEmail || (c as any).assignedCoachEmail || '').toLowerCase().trim();
+    if (clientCoachEmail && coachIdentifiers.has(clientCoachEmail)) return true;
+
+    // Match by name if present on client
+    const clientCoachName = ((c as any).coachName || (c as any).assignedCoachName || '').toLowerCase().trim();
+    if (clientCoachName && coachIdentifiers.has(clientCoachName)) return true;
+
+    // Check against loggedInCoach
+    if (loggedInCoach && (clientCoachId === loggedInCoach.id || clientCoachId === loggedInCoach.email)) return true;
+
+    return false;
+  }, [coachIdentifiers, loggedInCoach]);
 
   // Toggle state for Admins: switch between 'Admin Dashboard' (managing all staff/clients)
   // and personal 'Coach Dashboard' (managing only their assigned clients).
@@ -179,17 +250,20 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
 
   // Role & Mode-based client filtering:
   // If in personal coach view (either coach role or admin switched to personal coach view),
-  // only display clients where client.coachId === currentUserId
-  // If in admin dashboard mode, display all clients in the system
+  // only display clients assigned directly to that coach / admin.
+  // If in admin dashboard mode, display all clients in the system.
   const visibleClients = React.useMemo(() => {
     return clients.filter((c) => {
       if (isPersonalCoachView) {
-        const clientCoachId = c.coachId || c.assignedCoachId;
-        return clientCoachId === currentUserId;
+        return isClientAssignedToActiveCoach(c);
       }
       return true; // admin sees all
     });
-  }, [clients, isPersonalCoachView, currentUserId]);
+  }, [clients, isPersonalCoachView, isClientAssignedToActiveCoach]);
+
+  const myAssignedClientsCount = React.useMemo(() => {
+    return clients.filter(isClientAssignedToActiveCoach).length;
+  }, [clients, isClientAssignedToActiveCoach]);
 
   const filteredClients = React.useMemo(() => {
     const q = clientSearch.toLowerCase();
@@ -344,9 +418,18 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
     : (selectedClient?.availableEquipment && selectedClient.availableEquipment.length > 0 ? selectedClient.availableEquipment : []);
   const injuryNotesDisplay = clientIntake?.injuryHistory || clientIntake?.medicalNotes || (selectedClient.injuryNotes && selectedClient.injuryNotes !== 'None reported' && selectedClient.injuryNotes !== 'No clients assigned yet.' ? selectedClient.injuryNotes : (selectedClient?.id ? 'None reported. Cleared for all compound loads.' : 'No clients assigned yet.'));
 
-  const visibleCheckIns = checkInFilter === 'selected' && selectedClient?.id
-    ? allCheckIns.filter(c => c.clientId === selectedClient.id)
-    : allCheckIns;
+  const visibleCheckIns = React.useMemo(() => {
+    let list = allCheckIns;
+    if (isPersonalCoachView) {
+      list = list.filter(ci => 
+        visibleClients.some(vc => vc.id === ci.clientId || (ci.clientEmail && vc.email && ci.clientEmail.toLowerCase() === vc.email.toLowerCase()))
+      );
+    }
+    if (checkInFilter === 'selected' && selectedClient?.id) {
+      list = list.filter(c => c.clientId === selectedClient.id);
+    }
+    return list;
+  }, [allCheckIns, isPersonalCoachView, visibleClients, checkInFilter, selectedClient?.id]);
   const selectedCheckIn = visibleCheckIns.find(c => c.id === activeCheckInId) || visibleCheckIns[0];
 
   React.useEffect(() => {
@@ -404,6 +487,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
         fatGrams: Number(nutriFat) || 0,
         waterLiters: Number(nutriWater) || 0,
         dailyNotes: nutriNotes,
+        isPrescribed: true,
         updatedAt: new Date().toISOString().split('T')[0]
       });
       setNutritionSaved(true);
@@ -530,7 +614,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-red-600 to-red-700 p-0.5 shadow-md shadow-red-500/20">
               <img
-                src={currentUser?.photoURL || user?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80'}
+                src={currentUser?.photoURL || user?.photoURL || '/assets/founders/mass-gym.jpg'}
                 alt="Profile Avatar"
                 className="w-full h-full object-cover rounded-[14px]"
               />
@@ -603,7 +687,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                   <Dumbbell className="w-3.5 h-3.5 text-white" />
                   <span>Personal Coach Dashboard</span>
                   <span className="text-[10px] opacity-90 font-mono">
-                    ({clients.filter(c => (c.coachId || c.assignedCoachId) === currentUserId).length})
+                    ({myAssignedClientsCount})
                   </span>
                 </button>
               </div>
@@ -705,7 +789,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                     <p className="text-xs font-bold text-neutral-900 flex items-center gap-2">
                       <span>Personal Coach View Active</span>
                       <span className="px-1.5 py-0.2 rounded text-[10px] bg-red-600 text-white font-mono uppercase">
-                        {currentUser?.displayName}
+                        {activeCoachDisplayName}
                       </span>
                     </p>
                     <p className="text-[11px] text-neutral-600 mt-0.5">
@@ -743,7 +827,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                   <p className="text-xs text-neutral-500 mt-1">
                     {!isPersonalCoachView 
                       ? 'Link clients directly to founders or staff coaches using the Assigned Coach dropdown.'
-                      : `Displaying ${visibleClients.length} athlete(s) assigned to ${currentUser?.displayName || 'your roster'}.`
+                      : `Displaying ${visibleClients.length} athlete(s) assigned to ${activeCoachDisplayName}.`
                     }
                   </p>
                 </div>
@@ -785,7 +869,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                             <p className="text-xs text-neutral-500">
                               {isPersonalCoachView 
                                 ? userRole === 'admin'
-                                  ? `No athletes are currently assigned directly to ${currentUser?.displayName}. Switch to the Admin Dashboard to assign clients to yourself.`
+                                  ? `No athletes are currently assigned directly to ${activeCoachDisplayName}. Switch to the Admin Dashboard to assign clients to yourself.`
                                   : 'No athletes are currently assigned to your coach profile. Contact your administrator.'
                                 : 'No clients match your search filter.'
                               }
@@ -2047,13 +2131,13 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = ({
                 <select
                   value={selectedClientId}
                   onChange={(e) => setSelectedClientId(e.target.value)}
-                  disabled={clients.length === 0}
+                  disabled={visibleClients.length === 0}
                   className="bg-neutral-50 border border-neutral-300 rounded-lg px-3 py-1.5 text-xs text-neutral-900 focus:border-red-600 focus:outline-none font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {clients.length === 0 ? (
-                    <option value="" disabled>No athletes registered yet</option>
+                  {visibleClients.length === 0 ? (
+                    <option value="" disabled>No athletes assigned yet</option>
                   ) : (
-                    clients.map(c => (
+                    visibleClients.map(c => (
                       <option key={c.id} value={c.id}>
                         {c.name} ({c.activePlanName || c.planName})
                       </option>

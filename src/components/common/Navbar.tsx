@@ -35,10 +35,26 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const navigate = useNavigate();
   const { user, currentUser, signOut } = useAuth();
-  const { cmsContent } = useFitnessData();
+  const { cmsContent, clients, clientIntake } = useFitnessData();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const activeRole = currentUser?.role || user?.role;
+
+  const isClientUser = currentUser?.role === 'client' || (!['admin', 'coach', 'nutritionist'].includes(currentUser?.role || ''));
+  const currentClientEntry = clients?.find(c => c.id === currentUser?.uid || (currentUser?.email && c.email && c.email.toLowerCase() === currentUser.email.toLowerCase()));
+  const isClientPendingReview = Boolean(
+    clientIntake && (clientIntake.status === 'pending_review' || (clientIntake as any).approvalStatus === 'pending')
+  );
+  const isClientPendingActivation = isClientUser && Boolean(
+    isClientPendingReview ||
+    currentClientEntry?.status === 'pending' ||
+    currentClientEntry?.subscriptionStatus === 'pending_approval' ||
+    (currentClientEntry as any)?.approvalStatus === 'pending' ||
+    currentUser?.subscriptionStatus === 'pending_approval' ||
+    (currentUser as any)?.approvalStatus === 'pending' ||
+    (currentUser as any)?.status === 'pending' ||
+    (!currentClientEntry && Boolean(clientIntake))
+  ) && currentClientEntry?.status !== 'active' && clientIntake?.status !== 'active';
 
   const handleSignOut = async () => {
     setMobileMenuOpen(false);
@@ -172,11 +188,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div className="text-left leading-tight hidden lg:block">
                     <p className="text-xs font-bold text-neutral-900">{currentUser?.displayName}</p>
-                    <span className="text-[10px] uppercase font-bold text-red-600">
+                    <span className={`text-[10px] uppercase font-bold ${
+                      isClientPendingActivation ? 'text-amber-600' : 'text-red-600'
+                    }`}>
                       {currentUser?.role === 'admin' 
                         ? 'Founder & Admin' 
                         : currentUser?.role === 'coach' 
                         ? 'Coach' 
+                        : isClientPendingActivation
+                        ? 'Pending Activation'
                         : 'Active Client'}
                     </span>
                   </div>
@@ -296,7 +316,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div>
                     <p className="text-xs font-bold text-neutral-900">{currentUser?.displayName}</p>
-                    <p className="text-[10px] text-red-600 uppercase font-bold">{currentUser?.role}</p>
+                    <p className={`text-[10px] uppercase font-bold ${
+                      isClientPendingActivation ? 'text-amber-600' : 'text-red-600'
+                    }`}>
+                      {currentUser?.role === 'admin' 
+                        ? 'Founder & Admin' 
+                        : currentUser?.role === 'coach' 
+                        ? 'Coach' 
+                        : isClientPendingActivation
+                        ? 'Pending Activation'
+                        : 'Active Client'}
+                    </p>
                   </div>
                 </div>
                 <button

@@ -165,7 +165,9 @@ export function subscribeToClients(
         const isPending = data.subscriptionStatus === 'pending_approval' || 
           data.approvalStatus === 'pending' || 
           data.status === 'pending' || 
-          Boolean(data.renewalRequestedPlanId);
+          data.intakeStatus === 'pending_review' ||
+          Boolean(data.renewalRequestedPlanId) ||
+          (data.status !== 'active' && data.approvalStatus !== 'approved');
 
         const isExpired = !isPending && (
           data.subscriptionStatus === 'expired' || 
@@ -175,11 +177,11 @@ export function subscribeToClients(
 
         const effectiveStatus: ClientRosterItem['status'] = isPending
           ? 'pending'
-          : (isExpired ? 'expired' : (data.status || (data.hasCompletedIntake ? 'active' : 'pending')));
+          : (isExpired ? 'expired' : (data.status === 'active' || data.approvalStatus === 'approved' ? 'active' : 'pending'));
 
         const effectiveSubscriptionStatus: ClientRosterItem['subscriptionStatus'] = isPending
           ? 'pending_approval'
-          : (isExpired ? 'expired' : (data.subscriptionStatus || 'active'));
+          : (isExpired ? 'expired' : (data.subscriptionStatus || (effectiveStatus === 'active' ? 'active' : 'pending_approval')));
 
         const matchingPlan = INITIAL_COACHING_PLANS.find(p => 
           p.id === data.activePlanId || 
@@ -219,6 +221,10 @@ export function subscribeToClients(
           renewalRequestedPlanName: data.renewalRequestedPlanName,
           renewalRequestedPlanPrice: data.renewalRequestedPlanPrice,
           renewalRequestedAt: data.renewalRequestedAt,
+          waistCm: data.waistCm || data.baselineMeasurements?.waistCm,
+          chestCm: data.chestCm || data.baselineMeasurements?.chestCm,
+          bicepsCm: data.bicepsCm || data.baselineMeasurements?.bicepsCm,
+          baselineMeasurements: data.baselineMeasurements || (data.waistCm ? { waistCm: data.waistCm, chestCm: data.chestCm, bicepsCm: data.bicepsCm } : undefined),
         } as ClientRosterItem;
       });
 
@@ -253,9 +259,13 @@ export async function submitIntakeToFirestore(intakeData: IntakeFormData): Promi
       status: 'pending_review',
     });
 
-    // 2. Mark user's intake as completed & sync baseline metrics to client profile
+    // 2. Mark user's intake as completed & sync baseline metrics to client profile (pending coach approval)
     await setDoc(doc(db, USERS_COL, intakeData.clientId), {
       hasCompletedIntake: true,
+      intakeStatus: 'pending_review',
+      approvalStatus: 'pending',
+      subscriptionStatus: 'pending_approval',
+      status: 'pending',
       primaryGoal: intakeData.primaryGoal || 'general_fitness',
       startingWeightKg: Number(intakeData.currentWeightKg) || 0,
       currentWeightKg: Number(intakeData.currentWeightKg) || 0,
@@ -401,15 +411,18 @@ export async function updateIntakeStatusInFirestore(
         console.warn('[firestoreService] query intakes by clientId note:', qErr);
       }
 
-      // 3. Update client profile in `users` collection to reflect reviewed intake and active status
+      // 3. Update client profile in `users` collection to reflect reviewed intake and active/pending status
       try {
         const userDocRef = doc(db, USERS_COL, clientId);
+        const isApprovedActive = status === 'active';
         promises.push(
           setDoc(
             userDocRef,
             {
               intakeStatus: status,
-              status: 'active',
+              status: isApprovedActive ? 'active' : 'pending',
+              approvalStatus: isApprovedActive ? 'approved' : 'pending',
+              subscriptionStatus: isApprovedActive ? 'active' : 'pending_approval',
               hasCompletedIntake: true,
               updatedAt: serverTimestamp(),
             },
@@ -1079,7 +1092,16 @@ export async function saveNotificationToFirestore(
   }
 }
 
-/** Real-time listener for notifications targeted at a specific user or role. */
+/**
+ * Real-time listener for notifications targeted at a specific user or role.
+ *
+ * Scopes the Firestore query so that it satisfies the security rules:
+ *   - Clients: only documents where `userId == uid`
+ *   - Coaches/Admins: documents where `recipientRole == 'coach'` (covers coach-targeted + admin visibility)
+ *
+ * A second listener for the user's own direct notifications is merged in for coaches/admins
+ * so they also see personal notifications.
+ */
 export function subscribeToNotifications(
   userId: string | undefined,
   role: string | undefined,
@@ -1087,57 +1109,80 @@ export function subscribeToNotifications(
 ): () => void {
   const colRef = collection(db, NOTIFICATIONS_COL);
 
-  return onSnapshot(
-    colRef,
-    (snap) => {
-      const all = snap.docs.map((d) => {
-        const data = d.data();
-        // Convert Firestore Timestamp to relative string
-        let ts = 'Just now';
-        if (data.createdAt && data.createdAt.toDate) {
-          const created = data.createdAt.toDate() as Date;
-          const diffMs = Date.now() - created.getTime();
-          const diffMin = Math.floor(diffMs / 60000);
-          if (diffMin < 1) ts = 'Just now';
-          else if (diffMin < 60) ts = `${diffMin}m ago`;
-          else if (diffMin < 1440) ts = `${Math.floor(diffMin / 60)}h ago`;
-          else ts = `${Math.floor(diffMin / 1440)}d ago`;
-        }
-        return {
-          ...data,
-          id: d.id,
-          timestamp: ts,
-        } as InAppNotification;
-      });
+  // Helper: convert a snapshot's docs into typed InAppNotification[]
+  const mapDocs = (docs: import('firebase/firestore').QueryDocumentSnapshot[]) =>
+    docs.map((d) => {
+      const data = d.data();
+      let ts = 'Just now';
+      if (data.createdAt && data.createdAt.toDate) {
+        const created = data.createdAt.toDate() as Date;
+        const diffMs = Date.now() - created.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+        if (diffMin < 1) ts = 'Just now';
+        else if (diffMin < 60) ts = `${diffMin}m ago`;
+        else if (diffMin < 1440) ts = `${Math.floor(diffMin / 60)}h ago`;
+        else ts = `${Math.floor(diffMin / 1440)}d ago`;
+      }
+      return { ...data, id: d.id, timestamp: ts } as InAppNotification;
+    });
 
-      // Filter to notifications relevant to this user
-      const filtered = all.filter((n) => {
-        if (n.userId && n.userId === userId) return true;
-        if (n.recipientRole === role) return true;
-        if (role === 'admin' || role === 'coach') {
-          if (n.recipientRole === 'coach') return true;
-        }
-        // Global notifications (no userId and no recipientRole)
-        if (!n.userId && !n.recipientRole) return true;
-        return false;
-      });
+  const handleError = (err: Error) => {
+    console.error('[firestoreService] subscribeToNotifications error:', err);
+    onUpdate([]);
+  };
 
-      // Sort by createdAt descending (newest first), limit to 50
-      filtered.sort((a, b) => {
-        // Parse relative timestamps back for sorting — but Firestore order is more reliable
-        // We rely on doc ordering since createdAt is set by serverTimestamp
-        return 0; // onSnapshot returns in natural order; we reverse below
-      });
-
-      // Reverse to get newest first (onSnapshot gives insertion order)
-      const newest = filtered.slice(0, 50);
-      onUpdate(newest);
-    },
-    (err) => {
-      console.error('[firestoreService] subscribeToNotifications error:', err);
+  // ── Client role: single scoped query ──────────────────────────────
+  if (!role || role === 'client') {
+    if (!userId) {
+      // No authenticated user — return a no-op unsubscribe
       onUpdate([]);
+      return () => {};
     }
-  );
+    const scopedQuery = query(colRef, where('userId', '==', userId));
+    return onSnapshot(
+      scopedQuery,
+      (snap) => {
+        const results = mapDocs(snap.docs);
+        onUpdate(results.slice(0, 50));
+      },
+      handleError
+    );
+  }
+
+  // ── Coach / Admin: merge role-targeted + personal notifications ────
+  let roleResults: InAppNotification[] = [];
+  let personalResults: InAppNotification[] = [];
+  const merge = () => {
+    // De-duplicate by id, then take newest 50
+    const map = new Map<string, InAppNotification>();
+    for (const n of [...roleResults, ...personalResults]) {
+      map.set(n.id, n);
+    }
+    const merged = Array.from(map.values()).slice(0, 50);
+    onUpdate(merged);
+  };
+
+  // 1) Role-targeted notifications (recipientRole == 'coach')
+  const roleQuery = query(colRef, where('recipientRole', '==', 'coach'));
+  const unsubRole = onSnapshot(roleQuery, (snap) => {
+    roleResults = mapDocs(snap.docs);
+    merge();
+  }, handleError);
+
+  // 2) Personal notifications (userId == uid)
+  let unsubPersonal: (() => void) | null = null;
+  if (userId) {
+    const personalQuery = query(colRef, where('userId', '==', userId));
+    unsubPersonal = onSnapshot(personalQuery, (snap) => {
+      personalResults = mapDocs(snap.docs);
+      merge();
+    }, handleError);
+  }
+
+  return () => {
+    unsubRole();
+    unsubPersonal?.();
+  };
 }
 
 /** Mark a single notification as read in Firestore. */

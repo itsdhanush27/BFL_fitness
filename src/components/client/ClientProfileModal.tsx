@@ -33,19 +33,55 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
   onOpenRenewal
 }) => {
   const { user, updateProfile } = useAuth();
-  const { coachingPlans, coaches, clientIntake } = useFitnessData();
+  const { coachingPlans, coaches, clientIntake, clients } = useFitnessData();
 
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
   const [phone, setPhone] = useState('+1 (555) 234-5678');
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Find assigned coach
-  const assignedCoach = coaches.find(c => c.id === user?.assignedCoachId) || coaches[0];
+  // Find assigned coach and roster entry
+  const clientRosterEntry = clients?.find(c => c.id === user?.uid || c.email === user?.email);
+  const clientCoachId = user?.assignedCoachId || (clientRosterEntry as any)?.assignedCoachId || (clientIntake as any)?.assignedCoachId;
+  const assignedCoach = coaches.find(c => c.id === clientCoachId) || coaches[0];
   const activePlan = coachingPlans.find(p => p.id === user?.activePlanId) || coachingPlans[0];
 
+  const displayPlanName = 
+    clientRosterEntry?.planName ||
+    clientRosterEntry?.activePlanName ||
+    (clientIntake as any)?.selectedPlanName ||
+    user?.activePlanName ||
+    (user as any)?.renewalRequestedPlanName ||
+    activePlan?.name ||
+    'Coaching Program';
+
+  const displayPlanPrice = 
+    clientRosterEntry?.activePlanPrice ||
+    (clientIntake as any)?.selectedPlanPrice ||
+    user?.activePlanPrice ||
+    (user as any)?.renewalRequestedPlanPrice ||
+    activePlan?.price ||
+    '80';
+
+  const isIntakePendingReview = Boolean(
+    clientIntake && (clientIntake.status === 'pending_review' || (clientIntake as any).approvalStatus === 'pending')
+  );
+  const isRosterPending = Boolean(
+    clientRosterEntry && (
+      clientRosterEntry.status === 'pending' ||
+      clientRosterEntry.subscriptionStatus === 'pending_approval' ||
+      (clientRosterEntry as any).approvalStatus === 'pending'
+    )
+  );
+
   const isExpired = isPlanExpired(user) || (user as any)?.status === 'expired' || user?.subscriptionStatus === 'expired';
-  const isRenewalPending = user?.subscriptionStatus === 'pending_approval' || (user as any)?.approvalStatus === 'pending';
+  const isRenewalPending = !isExpired && (
+    isIntakePendingReview ||
+    isRosterPending ||
+    user?.subscriptionStatus === 'pending_approval' ||
+    (user as any)?.approvalStatus === 'pending' ||
+    Boolean(user?.renewalRequestedPlanId || clientRosterEntry?.renewalRequestedPlanId)
+  );
   const daysRemaining = getDaysRemaining(user?.planExpiresAt);
   const expiryFormatted = user?.planExpiresAt 
     ? new Date(user.planExpiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -113,10 +149,10 @@ export const ClientProfileModal: React.FC<ClientProfileModalProps> = ({
               )}
             </div>
             <h3 className="text-sm font-bold text-neutral-900 mt-1">
-              {isRenewalPending ? (user?.renewalRequestedPlanName || activePlan?.name) : (activePlan?.name || 'Online Coaching (Monthly)')}
+              {displayPlanName}
             </h3>
             <p className="text-xs text-neutral-600 mt-0.5">
-              ${activePlan?.price || 350} {activePlan?.period || '/ month'}
+              ${displayPlanPrice} {activePlan?.period || '/ month'}
               {isExpired && expiryFormatted ? ` • Concluded on ${expiryFormatted}` : ''}
               {!isExpired && !isRenewalPending && expiryFormatted ? ` • ${daysRemaining} days left (Expires ${expiryFormatted})` : ''}
             </p>

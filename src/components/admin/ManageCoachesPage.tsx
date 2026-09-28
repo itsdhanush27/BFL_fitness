@@ -58,10 +58,10 @@ export const ManageCoachesPage: React.FC<ManageCoachesPageProps> = ({ onNavigate
   };
 
   const presetAvatars = [
-    { label: 'Male Athletic 1', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80' },
-    { label: 'Female Athletic 1', url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&auto=format&fit=crop&q=80' },
-    { label: 'Female Clinical', url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&auto=format&fit=crop&q=80' },
-    { label: 'Male Strength', url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80' }
+    { label: 'Founder Mass (Gym)', url: '/assets/founders/mass-gym.jpg' },
+    { label: 'Founder Pouya (Boxing)', url: '/assets/founders/pouya-boxing.jpg' },
+    { label: 'Founder Mass (Stage)', url: '/assets/founders/mass-stage.png' },
+    { label: 'Founder Pouya (Strength)', url: '/assets/founders/pouya-powerlifting.jpg' }
   ];
 
   const handleCreateCoach = async (e: React.FormEvent) => {
